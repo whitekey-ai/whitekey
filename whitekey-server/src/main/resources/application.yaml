@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: whitekey
+  datasource:
+    url: jdbc:sqlite:${app.database.directory}/whitekey.sqlite?foreign_keys=on&journal_mode=WAL&synchronous=FULL&busy_timeout=5000
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 1
+  config:
+    import:
+      - optional:file:../.env[.properties]
+      - optional:classpath:credential-presets.yaml
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: ${JPA_DDL_AUTO:update}
+    database-platform: org.hibernate.community.dialect.SQLiteDialect
+
+server:
+  port: ${PORT:1111}
+  address: ${BIND_ADDRESS:127.0.0.1}
+  forward-headers-strategy: none
+
+app:
+  database:
+    directory: ${WHITEKEY_DATA_DIR:${user.home}/.local/share/whitekey}
+  security:
+    admin-token: ${WHITEKEY_ADMIN_TOKEN:}
+    token-file-name: ${WHITEKEY_ADMIN_TOKEN_FILE:whitekey_admin_token}
+    token-prefix: ${WHITEKEY_ADMIN_TOKEN_PREFIX:whitekey_admin_token_}
+    master-key-file-name: ${WHITEKEY_MASTER_KEY_FILE:whitekey_master.key}
+  audit:
+    max-body-bytes: ${WHITEKEY_MAX_AUDIT_BODY_BYTES:65536}
+  proxy:
+    enabled: ${PROXY_ENABLED:true}
+    port: ${PROXY_PORT:9999}
+    address: ${PROXY_ADDRESS:${server.address}}
