@@ -1,12 +1,11 @@
 package ai.whitekey.cli.client;
 
 import ai.whitekey.api.dto.Action;
-import ai.whitekey.api.dto.ApprovalRequest;
 import ai.whitekey.api.dto.CreateCredentialRequest;
 import ai.whitekey.api.dto.CreateRuleRequest;
 import ai.whitekey.api.dto.Credential;
 import ai.whitekey.api.dto.CredentialPreset;
-import ai.whitekey.api.dto.ResolveApprovalRequest;
+import ai.whitekey.api.dto.ResolveActionRequest;
 import ai.whitekey.api.dto.Rule;
 import ai.whitekey.api.dto.Status;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -26,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Comparator;
 import java.util.List;
 
 public class ApiClient {
@@ -43,7 +43,6 @@ public class ApiClient {
     public static final String PATH_RULES = "/rules";
     public static final String PATH_CREDENTIALS = "/credentials";
     public static final String PATH_CREDENTIAL_PRESETS = "/credentials/presets";
-    public static final String PATH_APPROVAL_REQUESTS = "/approval-requests";
     public static final String PATH_ACTIONS = "/actions";
 
     private final String serverUrl;
@@ -71,8 +70,9 @@ public class ApiClient {
         return post(PATH_RULES, request, Rule.class);
     }
 
-    public void deleteRule(String id) {
-        delete(PATH_RULES + "/" + id);
+    public void deleteRule(String name) {
+        String encoded = URLEncoder.encode(name, StandardCharsets.UTF_8).replace("+", "%20");
+        delete(PATH_RULES + "/" + encoded);
     }
 
     public List<Credential> getCredentials() {
@@ -93,13 +93,14 @@ public class ApiClient {
         delete(PATH_CREDENTIALS + "/" + name);
     }
 
-    public List<ApprovalRequest> getPendingApprovals() {
-        ApprovalRequest[] reqs = get(PATH_APPROVAL_REQUESTS + "?pending=true", ApprovalRequest[].class);
-        return reqs != null ? List.of(reqs) : List.of();
+    public List<Action> getPendingApprovals() {
+        return getHistory(MAX_ACTIONS_LIMIT, "AWAITING_APPROVAL", null, null).stream()
+                .sorted(Comparator.comparing(Action::id, Comparator.nullsLast(String::compareTo)))
+                .toList();
     }
 
-    public void resolveApproval(String requestId, String decision, boolean saveRule) {
-        postNoContent(PATH_APPROVAL_REQUESTS + "/" + requestId + "/resolve", new ResolveApprovalRequest(decision, saveRule));
+    public void resolveApproval(String actionId, String decision, boolean saveRule) {
+        postNoContent(PATH_ACTIONS + "/" + actionId + "/resolve", new ResolveActionRequest(decision, saveRule));
     }
 
     public List<Action> getHistory(int limit, String status, String method, String host) {

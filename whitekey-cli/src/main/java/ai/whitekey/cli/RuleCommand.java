@@ -20,8 +20,6 @@ import java.util.List;
         })
 public class RuleCommand implements Runnable {
 
-    public static final String DEFAULT_RULE_DESCRIPTION = "CLI Rule";
-
     @ParentCommand
     private WhiteKeyRootCommand root;
 
@@ -55,10 +53,10 @@ public class RuleCommand implements Runnable {
                     String paths = formatList(http.paths());
                     String cond = (http.bodyCondition() != null && !http.bodyCondition().isBlank()) ? " when " + http.bodyCondition() : "";
                     System.out.printf("%s  %-5s %-10s %s%s%s%n",
-                            http.id(), effect, methods, hosts, paths.equals("*") ? "" : " " + paths, cond);
+                            http.name(), effect, methods, hosts, paths.equals("*") ? "" : " " + paths, cond);
                 } else {
-                    System.out.printf("%s  %-5s [%s] %s%n",
-                            r.id(), r.effect() != null ? r.effect() : "-", r.type(), r.description() != null ? r.description() : "");
+                    System.out.printf("%s  %-5s [%s]%n",
+                            r.name(), r.effect() != null ? r.effect() : "-", r.type());
                 }
             }
         }
@@ -75,6 +73,9 @@ public class RuleCommand implements Runnable {
 
         @Option(names = "--help", usageHelp = true, description = "Show this help message and exit.")
         private boolean help;
+
+        @Option(names = {"-n", "--name"}, required = true, description = "Unique rule name (e.g. allow_github)")
+        private String name;
 
         @Option(names = {"-e", "--effect"}, required = true, description = "HttpRule effect: ALLOW, BLOCK, or ASK")
         private String effect;
@@ -94,15 +95,12 @@ public class RuleCommand implements Runnable {
         @Option(names = {"-c", "--condition"}, description = "CEL condition expression")
         private String condition;
 
-        @Option(names = {"-d", "--description"}, description = "HttpRule description")
-        private String description;
-
         @Override
         public void run() {
             CreateHttpRuleRequest payload = new CreateHttpRuleRequest(
+                    name,
                     ProtocolConstants.HTTP,
                     effect.toUpperCase(),
-                    description != null ? description : DEFAULT_RULE_DESCRIPTION,
                     methods,
                     hosts,
                     ports,
@@ -110,22 +108,22 @@ public class RuleCommand implements Runnable {
                     condition);
 
             Rule created = parent.getApiClient().createRule(payload);
-            System.out.println("Rule created successfully with ID: " + created.id());
+            System.out.println("Rule created: " + created.name());
         }
     }
 
-    @Command(name = "remove", description = "Remove a policy rule by ID", mixinStandardHelpOptions = true)
+    @Command(name = "remove", description = "Remove a policy rule by name", mixinStandardHelpOptions = true)
     public static class RemoveCommand implements Runnable {
         @ParentCommand
         private RuleCommand parent;
 
-        @Parameters(index = "0", description = "HttpRule ID (UUID)")
-        private String ruleId;
+        @Parameters(index = "0", description = "Rule name")
+        private String name;
 
         @Override
         public void run() {
-            parent.getApiClient().deleteRule(ruleId);
-            System.out.println("Rule " + ruleId + " deleted successfully.");
+            parent.getApiClient().deleteRule(name);
+            System.out.println("Rule '" + name + "' deleted successfully.");
         }
     }
 }

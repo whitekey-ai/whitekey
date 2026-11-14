@@ -52,10 +52,9 @@ public class HistoryCommand implements Runnable {
                 String actionStatus = ha.status() != null ? ha.status() : "-";
                 String actionMethod = ha.method() != null ? ha.method() : "-";
                 String target = (ha.host() != null ? ha.host() : "") + (ha.path() != null ? ha.path() : "");
-                String reason = (ha.reason() != null && !ha.reason().isBlank()) ? " - " + ha.reason() : "";
-                System.out.printf("%s  %-7s %-6s %s%s%n", ha.id(), actionStatus, actionMethod, target.isEmpty() ? "-" : target, reason);
+                System.out.printf("%s  %-7s %-6s %s%n", ha.id(), actionStatus, actionMethod, target.isEmpty() ? "-" : target);
             } else {
-                System.out.printf("%s  %-7s [%s] %s%n", action.id(), action.status() != null ? action.status() : "-", action.type(), action.reason() != null ? action.reason() : "");
+                System.out.printf("%s  %-7s [%s]%n", action.id(), action.status() != null ? action.status() : "-", action.type());
             }
         }
     }
