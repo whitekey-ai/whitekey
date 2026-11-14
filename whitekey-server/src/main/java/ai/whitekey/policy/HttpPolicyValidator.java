@@ -44,6 +44,13 @@ public final class HttpPolicyValidator {
         return HttpMethod.valueOf(method.toUpperCase(Locale.ROOT));
     }
 
+    public List<HttpMethod> methodNames(List<String> input) {
+        if (input == null || input.isEmpty()) {
+            return List.of();
+        }
+        return input.stream().map(this::method).toList();
+    }
+
     public List<HttpMethod> methods(List<HttpMethod> input) {
         if (input == null || input.isEmpty()) {
             return List.of();
