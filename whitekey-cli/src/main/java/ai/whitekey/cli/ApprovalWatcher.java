@@ -43,7 +43,7 @@ final class ApprovalWatcher {
          * Displays the 3-option pointer menu for {@code current} and returns the chosen action,
          * {@code null} if the user quits, or {@link PromptResult#stale()} if the action ceased to be pending.
          */
-        PromptResult select(Action current, int totalWaiting) throws IOException;
+        PromptResult select(Action current) throws IOException;
     }
 
     record PromptResult(Choice choice, boolean quit, boolean stale) {
@@ -60,11 +60,9 @@ final class ApprovalWatcher {
         }
     }
 
-    static final int DEFAULT_POLL_INTERVAL_MS = 300;
-    private static final int MIN_POLL_INTERVAL_MS = 100;
-    private static final int KEY_READ_TIMEOUT_MS = 200;
     private static final int ESC_SEQUENCE_TIMEOUT_MS = 30;
     private static final int MAX_BODY_PREVIEW_CHARS = 160;
+    private static final Choice[] OPTIONS = Choice.values();
 
     private final ApiClient apiClient;
     private final PrintWriter out;
@@ -73,7 +71,7 @@ final class ApprovalWatcher {
     ApprovalWatcher(ApiClient apiClient, PrintWriter out, int pollIntervalMs) {
         this.apiClient = Objects.requireNonNull(apiClient, "apiClient");
         this.out = Objects.requireNonNull(out, "out");
-        this.pollIntervalMs = Math.max(MIN_POLL_INTERVAL_MS, pollIntervalMs);
+        this.pollIntervalMs = pollIntervalMs;
     }
 
     void watchInteractive() {
@@ -81,9 +79,9 @@ final class ApprovalWatcher {
             boolean dumb = terminal.getType() != null && terminal.getType().startsWith("dumb");
             if (dumb) {
                 BufferedReader lineReader = new BufferedReader(new InputStreamReader(terminal.input()));
-                watchLoop(new LinePrompt(lineReader, out));
+                watchLoop(new LinePrompt(lineReader));
             } else {
-                watchLoop(new JLinePointerPrompt(terminal, apiClient, out, pollIntervalMs));
+                watchLoop(new JLinePointerPrompt(terminal));
             }
         } catch (IOException e) {
             throw new CliException("Terminal error: " + e.getMessage());
@@ -110,7 +108,7 @@ final class ApprovalWatcher {
             Action current = pending.get(0);
             printActionCard(current, pending.size());
 
-            PromptResult result = prompt.select(current, pending.size());
+            PromptResult result = prompt.select(current);
             if (result.quit()) {
                 out.println("Stopped watching.");
                 out.flush();
@@ -193,37 +191,25 @@ final class ApprovalWatcher {
                 || message.toLowerCase().contains("no longer awaiting approval");
     }
 
-    private static final class JLinePointerPrompt implements Prompt {
-        private static final Choice[] OPTIONS = Choice.values();
+    private final class JLinePointerPrompt implements Prompt {
         private final Terminal terminal;
-        private final ApiClient apiClient;
-        private final PrintWriter out;
-        private final int statusCheckIntervalMs;
 
-        JLinePointerPrompt(Terminal terminal, ApiClient apiClient, PrintWriter out, int pollIntervalMs) {
+        JLinePointerPrompt(Terminal terminal) {
             this.terminal = terminal;
-            this.apiClient = apiClient;
-            this.out = out;
-            this.statusCheckIntervalMs = Math.max(500, pollIntervalMs);
         }
 
         @Override
-        public PromptResult select(Action current, int totalWaiting) throws IOException {
+        public PromptResult select(Action current) throws IOException {
             int selected = 0;
             renderMenu(selected, false);
             Attributes saved = terminal.enterRawMode();
             try {
                 NonBlockingReader reader = terminal.reader();
-                long lastCheckNanos = System.nanoTime();
                 while (true) {
-                    int ch = reader.read(KEY_READ_TIMEOUT_MS);
+                    int ch = reader.read(pollIntervalMs);
                     if (ch == NonBlockingReader.READ_EXPIRED) {
-                        long elapsedMs = (System.nanoTime() - lastCheckNanos) / 1_000_000L;
-                        if (elapsedMs >= statusCheckIntervalMs) {
-                            lastCheckNanos = System.nanoTime();
-                            if (!isStillPending(current.id())) {
-                                return PromptResult.staleSignal();
-                            }
+                        if (!isStillPending(current.id())) {
+                            return PromptResult.staleSignal();
                         }
                         continue;
                     }
@@ -296,23 +282,20 @@ final class ApprovalWatcher {
         }
     }
 
-    private static final class LinePrompt implements Prompt {
-        private static final Choice[] OPTIONS = Choice.values();
+    private final class LinePrompt implements Prompt {
         private final BufferedReader reader;
-        private final PrintWriter out;
 
-        LinePrompt(BufferedReader reader, PrintWriter out) {
+        LinePrompt(BufferedReader reader) {
             this.reader = reader;
-            this.out = out;
         }
 
         @Override
-        public PromptResult select(Action current, int totalWaiting) throws IOException {
+        public PromptResult select(Action current) throws IOException {
             for (int i = 0; i < OPTIONS.length; i++) {
                 out.printf("  %d. %s%n", i + 1, OPTIONS[i].label);
             }
             while (true) {
-                out.print("Select [1-3, q to quit]: ");
+                out.print("Select [1-" + OPTIONS.length + ", q to quit]: ");
                 out.flush();
                 String line = reader.readLine();
                 if (line == null) {
@@ -322,16 +305,13 @@ final class ApprovalWatcher {
                 if ("q".equalsIgnoreCase(trimmed)) {
                     return PromptResult.quitSignal();
                 }
-                if ("1".equals(trimmed)) {
-                    return PromptResult.selected(Choice.APPROVE);
+                if (trimmed.length() == 1) {
+                    int idx = trimmed.charAt(0) - '1';
+                    if (idx >= 0 && idx < OPTIONS.length) {
+                        return PromptResult.selected(OPTIONS[idx]);
+                    }
                 }
-                if ("2".equals(trimmed)) {
-                    return PromptResult.selected(Choice.APPROVE_AND_SAVE);
-                }
-                if ("3".equals(trimmed)) {
-                    return PromptResult.selected(Choice.REJECT);
-                }
-                out.println("Invalid choice. Enter 1, 2, 3, or q.");
+                out.println("Invalid choice. Enter 1-" + OPTIONS.length + ", or q.");
             }
         }
     }
