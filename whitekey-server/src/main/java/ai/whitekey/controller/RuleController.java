@@ -27,7 +27,6 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.Locale;
 
 @RestController
 @RequestMapping("/rules")
@@ -53,7 +52,7 @@ public class RuleController {
         if (request instanceof CreateHttpRuleRequest httpReq) {
             RuleEffect effect = RuleEffect.fromString(httpReq.effect());
             List<HttpMethod> methods = httpReq.methods() != null
-                    ? httpReq.methods().stream().map(m -> HttpMethod.valueOf(m.trim().toUpperCase(Locale.ROOT))).toList()
+                    ? httpReq.methods().stream().map(validator::method).toList()
                     : List.of();
             HttpHeaders headers = httpReq.headers() != null ? validator.headers(httpReq.headers()) : HttpHeaders.EMPTY;
             HttpRuleEntity created = rules.createHttpRule(
@@ -81,7 +80,7 @@ public class RuleController {
             @PathVariable String name, @Valid @RequestBody UpdateHttpRuleRequest request) {
         RuleEffect effect = request.effect() != null ? RuleEffect.fromString(request.effect()) : null;
         List<HttpMethod> methods = request.methods() != null
-                ? request.methods().stream().map(m -> HttpMethod.valueOf(m.trim().toUpperCase(Locale.ROOT))).toList()
+                ? request.methods().stream().map(validator::method).toList()
                 : null;
         HttpHeaders headers = request.headers() != null ? validator.headers(request.headers()) : null;
         HttpRuleEntity updated = rules.updateHttpRule(
