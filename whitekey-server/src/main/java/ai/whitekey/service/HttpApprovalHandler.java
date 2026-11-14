@@ -1,6 +1,5 @@
 package ai.whitekey.service;
 
-import ai.whitekey.entity.ActionEntity;
 import ai.whitekey.entity.HttpActionEntity;
 import ai.whitekey.entity.RuleEffect;
 import ai.whitekey.exception.ApprovalConflictException;
@@ -13,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 @Component
-public class HttpApprovalHandler implements ProtocolApprovalHandler {
+public class HttpApprovalHandler implements ProtocolApprovalHandler<HttpActionEntity> {
 
     private final RuleService rules;
     private final SetupService setupService;
@@ -26,15 +25,13 @@ public class HttpApprovalHandler implements ProtocolApprovalHandler {
     }
 
     @Override
-    public boolean supports(ActionEntity action) {
-        return action instanceof HttpActionEntity;
+    public Class<HttpActionEntity> getActionType() {
+        return HttpActionEntity.class;
     }
 
     @Override
-    public void validateApproval(ActionEntity action, boolean saveRule) {
-        HttpActionEntity http = requireHttp(action);
-        var currentRules = rules.getHttpRules();
-        var current = engine.evaluateHttp(http, currentRules);
+    public void validateApproval(HttpActionEntity http, boolean saveRule) {
+        var current = engine.evaluateHttp(http, rules.getHttpRules());
         if (current.isUnmatchedAction() && !setupService.isSetupMode()) {
             throw new ApprovalConflictException("Setup mode has ended");
         }
@@ -46,8 +43,7 @@ public class HttpApprovalHandler implements ProtocolApprovalHandler {
     }
 
     @Override
-    public void saveAllowRule(ActionEntity action) {
-        HttpActionEntity http = requireHttp(action);
+    public void saveAllowRule(HttpActionEntity http) {
         HttpMethod method = http.getMethod();
         String host = http.getHost();
         int port = http.getPort();
@@ -78,12 +74,5 @@ public class HttpApprovalHandler implements ProtocolApprovalHandler {
                     List.of(path),
                     Map.of());
         }
-    }
-
-    private static HttpActionEntity requireHttp(ActionEntity action) {
-        if (action instanceof HttpActionEntity http) {
-            return http;
-        }
-        throw new IllegalArgumentException("Action must be an HttpActionEntity: " + action);
     }
 }

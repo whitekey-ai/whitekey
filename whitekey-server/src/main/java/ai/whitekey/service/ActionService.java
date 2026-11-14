@@ -34,14 +34,14 @@ public class ActionService {
     private final ActionRepository actionRepository;
     private final HttpActionRepository httpActionRepository;
     private final ApprovalWaitRegistry waitRegistry;
-    private final List<ProtocolApprovalHandler> protocolHandlers;
+    private final List<ProtocolApprovalHandler<?>> protocolHandlers;
     private final int maxStoredBodyBytes;
 
     public ActionService(
             ActionRepository actionRepository,
             HttpActionRepository httpActionRepository,
             ApprovalWaitRegistry waitRegistry,
-            List<ProtocolApprovalHandler> protocolHandlers,
+            List<ProtocolApprovalHandler<?>> protocolHandlers,
             @Value("${app.audit.max-body-bytes:" + DEFAULT_MAX_STORED_BODY_SIZE + "}") DataSize maxStoredBodySize) {
         this.actionRepository = actionRepository;
         this.httpActionRepository = httpActionRepository;
@@ -140,19 +140,19 @@ public class ActionService {
             throw new ApprovalConflictException(
                     "This action is no longer awaiting approval. Refresh and try again.");
         }
-        ProtocolApprovalHandler handler = protocolHandlers.stream()
+        ProtocolApprovalHandler<?> handler = protocolHandlers.stream()
                 .filter(h -> h.supports(action))
                 .findFirst()
                 .orElse(null);
         if (nextStatus == ActionStatus.ALLOWED && handler != null) {
-            handler.validateApproval(action, saveRule);
+            handler.validate(action, saveRule);
         }
         if (actionRepository.resolvePending(id, nextStatus) == 0) {
             throw new ApprovalConflictException(
                     "This action is no longer awaiting approval. Refresh and try again.");
         }
         if (saveRule && handler != null) {
-            handler.saveAllowRule(action);
+            handler.saveRule(action);
         }
         action.setStatus(nextStatus);
         waitRegistry.notifyResolved(id);

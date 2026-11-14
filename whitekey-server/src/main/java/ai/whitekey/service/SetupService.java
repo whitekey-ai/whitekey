@@ -45,35 +45,32 @@ public class SetupService {
 
     @Transactional
     public void start() {
-        var setup = setupRepository
-                        .findById(SetupStateEntity.GLOBAL_ID)
-                        .orElseGet(() -> new SetupStateEntity(false));
-        if (setup.isSetupMode()) {
-            return;
-        }
-        setup.setSetupMode(true);
-        setupRepository.saveAndFlush(setup);
+        setSetupMode(true);
     }
 
     @Transactional
     public void finish() {
-        var setup = setupRepository
-                        .findById(SetupStateEntity.GLOBAL_ID)
-                        .orElseGet(() -> new SetupStateEntity(false));
-        setup.setSetupMode(false);
-        setupRepository.save(setup);
+        setSetupMode(false);
 
         var currentRules = rules.getHttpRules();
         var pending = actionRepository.findByStatusOrderByIdAsc(ActionStatus.AWAITING_APPROVAL, Pageable.unpaged());
         for (ActionEntity action : pending) {
-            if (action instanceof HttpActionEntity http && engine.evaluateHttp(http, currentRules).isUnmatchedAction()) {
-                int changed = actionRepository.resolvePending(
-                        http.getId(),
-                        ActionStatus.EXPIRED);
-                if (changed > 0) {
-                    waitRegistry.notifyResolved(http.getId());
-                }
+            if (action instanceof HttpActionEntity http
+                    && engine.evaluateHttp(http, currentRules).isUnmatchedAction()
+                    && actionRepository.resolvePending(http.getId(), ActionStatus.EXPIRED) > 0) {
+                waitRegistry.notifyResolved(http.getId());
             }
         }
+    }
+
+    private void setSetupMode(boolean enabled) {
+        var setup = setupRepository
+                .findById(SetupStateEntity.GLOBAL_ID)
+                .orElseGet(() -> new SetupStateEntity(false));
+        if (enabled && setup.isSetupMode()) {
+            return;
+        }
+        setup.setSetupMode(enabled);
+        setupRepository.saveAndFlush(setup);
     }
 }
