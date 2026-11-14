@@ -2,20 +2,16 @@ package ai.whitekey.cli;
 
 import ai.whitekey.api.dto.Status;
 import picocli.CommandLine.Command;
-import picocli.CommandLine.ParentCommand;
 
 @Command(name = "status", description = "Show WhiteKey proxy and policy engine status", mixinStandardHelpOptions = true)
-public class StatusCommand implements Runnable {
+public class StatusCommand extends BaseCommand {
 
     public static final String STATUS_RUNNING = "RUNNING";
     public static final String STATUS_STOPPED = "STOPPED";
 
-    @ParentCommand
-    private WhiteKeyRootCommand root;
-
     @Override
     public void run() {
-        Status status = root.getApiClient().getStatus();
+        Status status = getApiClient().getStatus();
 
         System.out.printf("Proxy: %s (port %s)%n",
                 status.proxyRunning() ? STATUS_RUNNING : STATUS_STOPPED,
