@@ -15,11 +15,9 @@ import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
@@ -144,8 +142,7 @@ public class RuleService {
         List<HttpRuleEntity> rules = ruleCache.get();
         if (rules == null) {
             rules = List.copyOf(httpRuleRepository.findAll());
-            ruleCache.compareAndSet(null, rules);
-            rules = ruleCache.get();
+            ruleCache.set(rules);
         }
         return rules;
     }
@@ -214,25 +211,18 @@ public class RuleService {
         String sanitized = (rawBase == null ? "" : rawBase.toLowerCase(Locale.ROOT))
                 .replaceAll("[^a-z0-9]+", "_")
                 .replaceAll("^_+|_+$", "");
+        if (sanitized.length() > MAX_AUTO_NAME_BASE_LENGTH) {
+            sanitized = sanitized.substring(0, MAX_AUTO_NAME_BASE_LENGTH).replaceAll("_+$", "");
+        }
         if (sanitized.isEmpty()) {
             sanitized = "allow_rule";
         }
-        if (sanitized.length() > MAX_AUTO_NAME_BASE_LENGTH) {
-            sanitized = sanitized.substring(0, MAX_AUTO_NAME_BASE_LENGTH).replaceAll("_+$", "");
-            if (sanitized.isEmpty()) {
-                sanitized = "allow_rule";
-            }
-        }
-        String pattern = (sanitized + "_").replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
-        Set<String> taken = new HashSet<>(repository.findNamesWithPrefix(sanitized, pattern));
-        if (!taken.contains(sanitized)) {
-            return sanitized;
-        }
+        String candidate = sanitized;
         int suffix = 1;
-        while (taken.contains(sanitized + "_" + suffix)) {
-            suffix++;
+        while (repository.existsByName(candidate)) {
+            candidate = sanitized + "_" + suffix++;
         }
-        return sanitized + "_" + suffix;
+        return candidate;
     }
 
     private static String normalizeAndValidateName(String rawName) {
