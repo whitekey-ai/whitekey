@@ -8,10 +8,13 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
-@Command(name = "rules", description = "Manage policy rules", mixinStandardHelpOptions = true,
+@Command(name = "rules", description = "Manage policy rules",
         subcommands = {
                 RuleCommand.ListCommand.class,
                 RuleCommand.AddCommand.class,
@@ -19,12 +22,7 @@ import java.util.stream.Collectors;
         })
 public class RuleCommand extends BaseCommand {
 
-    @Override
-    public void run() {
-        System.out.println("Use 'rules --help' to see available subcommands (list, add, remove).");
-    }
-
-    @Command(name = "list", description = "List all active policy rules", mixinStandardHelpOptions = true)
+    @Command(name = "list", description = "List all active policy rules")
     public static class ListCommand extends BaseCommand {
 
         @Override
@@ -61,28 +59,31 @@ public class RuleCommand extends BaseCommand {
     @Command(name = "add", description = "Add a new HTTP policy rule")
     public static class AddCommand extends BaseCommand {
 
-        @Option(names = "--help", usageHelp = true, description = "Show this help message and exit.")
-        private boolean help;
-
-        @Option(names = {"-n", "--name"}, required = true, description = "Unique rule name (e.g. allow_github)")
+        @Option(names = "--name", required = true, description = "Unique rule name (e.g. allow_github)")
         private String name;
 
-        @Option(names = {"-e", "--effect"}, required = true, description = "HttpRule effect: ALLOW, BLOCK, or ASK")
+        @Option(names = "--effect", required = true, description = "Rule effect: ALLOW, BLOCK, or ASK")
         private String effect;
 
-        @Option(names = {"-m", "--methods"}, split = ",", description = "Comma-separated HTTP methods (e.g. GET,POST)")
+        @Option(names = "--methods", split = ",", description = "Comma-separated HTTP methods (e.g. GET,POST)")
         private List<String> methods = List.of();
 
-        @Option(names = {"-h", "--hosts"}, required = true, split = ",", description = "Comma-separated exact DNS hosts (e.g. api.github.com,slack.com)")
+        @Option(names = "--hosts", required = true, split = ",", description = "Comma-separated exact DNS hosts (e.g. api.github.com,slack.com)")
         private List<String> hosts = List.of();
 
-        @Option(names = {"-p", "--ports"}, split = ",", description = "Comma-separated ports (e.g. 80,443)")
+        @Option(names = "--ports", split = ",", description = "Comma-separated ports (e.g. 80,443)")
         private List<Integer> ports = List.of();
 
-        @Option(names = {"--paths"}, defaultValue = "/*", split = ",", description = "Comma-separated path patterns (default: /*, e.g. /v1/*)")
+        @Option(names = "--paths", defaultValue = "/*", split = ",", description = "Comma-separated path patterns (default: /*, e.g. /v1/*)")
         private List<String> paths = List.of("/*");
 
-        @Option(names = {"-c", "--condition"}, description = "CEL condition expression")
+        @Option(names = "--query", split = ",", description = "Comma-separated query params (e.g. env=prod,page=1)")
+        private List<String> query = List.of();
+
+        @Option(names = "--headers", split = ",", description = "Comma-separated HTTP headers (e.g. X-Env=prod)")
+        private List<String> headers = List.of();
+
+        @Option(names = "--condition", description = "CEL body condition expression")
         private String condition;
 
         @Override
@@ -95,14 +96,33 @@ public class RuleCommand extends BaseCommand {
                     hosts,
                     ports,
                     paths,
+                    parseMultiMap(query),
+                    parseMultiMap(headers),
                     condition);
 
             Rule created = getApiClient().createRule(payload);
             System.out.println("Rule created: " + created.name());
         }
+
+        private static Map<String, List<String>> parseMultiMap(List<String> entries) {
+            if (entries == null || entries.isEmpty()) {
+                return Map.of();
+            }
+            Map<String, List<String>> map = new LinkedHashMap<>();
+            for (String entry : entries) {
+                int eq = entry.indexOf('=');
+                if (eq > 0) {
+                    map.computeIfAbsent(entry.substring(0, eq).trim(), k -> new ArrayList<>())
+                            .add(entry.substring(eq + 1).trim());
+                } else {
+                    map.computeIfAbsent(entry.trim(), k -> new ArrayList<>());
+                }
+            }
+            return map;
+        }
     }
 
-    @Command(name = "remove", description = "Remove a policy rule by name", mixinStandardHelpOptions = true)
+    @Command(name = "remove", description = "Remove a policy rule by name")
     public static class RemoveCommand extends BaseCommand {
 
         @Parameters(index = "0", description = "Rule name")
