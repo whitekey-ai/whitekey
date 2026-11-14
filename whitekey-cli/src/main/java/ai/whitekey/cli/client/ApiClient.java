@@ -62,8 +62,7 @@ public class ApiClient {
     }
 
     public List<Rule> getRules() {
-        Rule[] rules = get(PATH_RULES, Rule[].class);
-        return rules != null ? List.of(rules) : List.of();
+        return getList(PATH_RULES, Rule[].class);
     }
 
     public Rule createRule(CreateRuleRequest request) {
@@ -75,13 +74,11 @@ public class ApiClient {
     }
 
     public List<Credential> getCredentials() {
-        Credential[] creds = get(PATH_CREDENTIALS, Credential[].class);
-        return creds != null ? List.of(creds) : List.of();
+        return getList(PATH_CREDENTIALS, Credential[].class);
     }
 
     public List<CredentialPreset> getCredentialPresets() {
-        CredentialPreset[] presets = get(PATH_CREDENTIAL_PRESETS, CredentialPreset[].class);
-        return presets != null ? List.of(presets) : List.of();
+        return getList(PATH_CREDENTIAL_PRESETS, CredentialPreset[].class);
     }
 
     public Credential createCredential(CreateCredentialRequest request) {
@@ -103,28 +100,31 @@ public class ApiClient {
     }
 
     public void resolveApproval(String actionId, String decision, boolean saveRule) {
-        postNoContent(PATH_ACTIONS + "/" + actionId + "/resolve", new ResolveActionRequest(decision, saveRule));
+        post(PATH_ACTIONS + "/" + actionId + "/resolve", new ResolveActionRequest(decision, saveRule), Void.class);
     }
 
     public List<Action> getHistory(int limit, String status, String method, String host) {
         int validLimit = Math.max(1, Math.min(limit, MAX_ACTIONS_LIMIT));
         StringBuilder path = new StringBuilder(PATH_ACTIONS + "?page=0&limit=").append(validLimit);
-        if (status != null && !status.isBlank()) {
-            path.append("&status=").append(URLEncoder.encode(status.trim().toUpperCase(), StandardCharsets.UTF_8));
-        }
-        if (method != null && !method.isBlank()) {
-            path.append("&method=").append(URLEncoder.encode(method.trim().toUpperCase(), StandardCharsets.UTF_8));
-        }
-        if (host != null && !host.isBlank()) {
-            path.append("&host=").append(URLEncoder.encode(host.trim(), StandardCharsets.UTF_8));
-        }
+        appendQueryParam(path, "status", status != null ? status.toUpperCase() : null);
+        appendQueryParam(path, "method", method != null ? method.toUpperCase() : null);
+        appendQueryParam(path, "host", host);
+        return getList(path.toString(), Action[].class);
+    }
 
-        Action[] actions = get(path.toString(), Action[].class);
-        return actions != null ? List.of(actions) : List.of();
+    private static void appendQueryParam(StringBuilder path, String key, String value) {
+        if (value != null && !value.isBlank()) {
+            path.append('&').append(key).append('=').append(URLEncoder.encode(value.trim(), StandardCharsets.UTF_8));
+        }
     }
 
     public void clearHistory() {
         delete(PATH_ACTIONS);
+    }
+
+    private <T> List<T> getList(String path, Class<T[]> arrayClass) {
+        T[] items = get(path, arrayClass);
+        return items != null ? List.of(items) : List.of();
     }
 
     private <T> T get(String path, Class<T> clazz) {
@@ -133,24 +133,12 @@ public class ApiClient {
     }
 
     private <T> T post(String path, Object body, Class<T> clazz) {
-        String json = serialize(body);
         HttpRequest request = newRequestBuilder(path)
                 .header(HEADER_CONTENT_TYPE, APPLICATION_JSON)
-                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .POST(HttpRequest.BodyPublishers.ofString(serialize(body)))
                 .build();
         HttpResponse<String> response = send(request);
         return deserialize(response.body(), clazz);
-    }
-
-    private void postNoContent(String path, Object body) {
-        HttpRequest.Builder builder = newRequestBuilder(path);
-        if (body != null) {
-            builder.header(HEADER_CONTENT_TYPE, APPLICATION_JSON);
-            builder.POST(HttpRequest.BodyPublishers.ofString(serialize(body)));
-        } else {
-            builder.POST(HttpRequest.BodyPublishers.noBody());
-        }
-        send(builder.build());
     }
 
     private void delete(String path) {
