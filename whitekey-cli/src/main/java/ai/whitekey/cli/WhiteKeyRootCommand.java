@@ -10,6 +10,7 @@ import picocli.CommandLine.Option;
         version = "0.0.1",
         subcommands = {
                 StatusCommand.class,
+                SetupCommand.class,
                 RuleCommand.class,
                 CredentialCommand.class,
                 ApprovalCommand.class,
