@@ -2,13 +2,11 @@ package ai.whitekey.cli;
 
 import ai.whitekey.api.dto.CreateHttpCredentialRequest;
 import ai.whitekey.api.dto.Credential;
-import ai.whitekey.api.dto.HttpCredential;
 import ai.whitekey.api.dto.CredentialPreset;
-import ai.whitekey.cli.client.ApiClient;
+import ai.whitekey.api.dto.HttpCredential;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.ParentCommand;
 
 import java.util.List;
 
@@ -19,17 +17,10 @@ import java.util.List;
                 CredentialCommand.SetCommand.class,
                 CredentialCommand.RemoveCommand.class
         })
-public class CredentialCommand implements Runnable {
+public class CredentialCommand extends BaseCommand {
 
     public static final String DEFAULT_TARGET_TYPE = "HEADER";
     public static final String WILDCARD_HOST = "*";
-
-    @ParentCommand
-    private WhiteKeyRootCommand root;
-
-    public ApiClient getApiClient() {
-        return root.getApiClient();
-    }
 
     @Override
     public void run() {
@@ -37,13 +28,11 @@ public class CredentialCommand implements Runnable {
     }
 
     @Command(name = "list", description = "List configured credentials (secrets masked)", mixinStandardHelpOptions = true)
-    public static class ListCommand implements Runnable {
-        @ParentCommand
-        private CredentialCommand parent;
+    public static class ListCommand extends BaseCommand {
 
         @Override
         public void run() {
-            List<Credential> credentials = parent.getApiClient().getCredentials();
+            List<Credential> credentials = getApiClient().getCredentials();
             if (credentials == null || credentials.isEmpty()) {
                 System.out.println("No credentials configured.");
                 return;
@@ -66,13 +55,11 @@ public class CredentialCommand implements Runnable {
     }
 
     @Command(name = "presets", description = "List available built-in credential presets", mixinStandardHelpOptions = true)
-    public static class PresetsCommand implements Runnable {
-        @ParentCommand
-        private CredentialCommand parent;
+    public static class PresetsCommand extends BaseCommand {
 
         @Override
         public void run() {
-            List<CredentialPreset> presets = parent.getApiClient().getCredentialPresets();
+            List<CredentialPreset> presets = getApiClient().getCredentialPresets();
             if (presets == null || presets.isEmpty()) {
                 System.out.println("No presets available.");
                 return;
@@ -85,9 +72,7 @@ public class CredentialCommand implements Runnable {
     }
 
     @Command(name = "set", description = "Add or update a credential")
-    public static class SetCommand implements Runnable {
-        @ParentCommand
-        private CredentialCommand parent;
+    public static class SetCommand extends BaseCommand {
 
         @Option(names = "--help", usageHelp = true, description = "Show this help message and exit.")
         private boolean help;
@@ -124,22 +109,20 @@ public class CredentialCommand implements Runnable {
                     format,
                     secret);
 
-            Credential created = parent.getApiClient().createCredential(payload);
+            Credential created = getApiClient().createCredential(payload);
             System.out.println("Saved " + created.name());
         }
     }
 
     @Command(name = "remove", description = "Remove a credential by name", mixinStandardHelpOptions = true)
-    public static class RemoveCommand implements Runnable {
-        @ParentCommand
-        private CredentialCommand parent;
+    public static class RemoveCommand extends BaseCommand {
 
         @Parameters(index = "0", description = "Credential name to remove")
         private String name;
 
         @Override
         public void run() {
-            parent.getApiClient().deleteCredential(name);
+            getApiClient().deleteCredential(name);
             System.out.println("Credential '" + name + "' removed.");
         }
     }
