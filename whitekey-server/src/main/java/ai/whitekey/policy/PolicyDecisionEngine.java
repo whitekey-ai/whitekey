@@ -250,12 +250,7 @@ public final class PolicyDecisionEngine {
         if (!matchesRuleHeaders(rule.getHeaders(), action.getHeaders())) {
             return false;
         }
-        if (rule.getBodyCondition() != null && !rule.getBodyCondition().isBlank()) {
-            if (!bodyEvaluator.matches(rule.getBodyCondition(), action.getBody())) {
-                return false;
-            }
-        }
-        return true;
+        return matchesBody(rule, action.getBody());
     }
 
     private static boolean matchesQueryParams(Map<String, List<String>> expected, Map<String, List<String>> actual) {
