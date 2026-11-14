@@ -236,10 +236,7 @@ public class RuleService {
     }
 
     private static String normalizeAndValidateName(String rawName) {
-        if (rawName == null || rawName.isBlank()) {
-            throw new IllegalArgumentException("Rule name must not be blank");
-        }
-        String normalized = rawName.trim().toLowerCase(Locale.ROOT);
+        String normalized = normalizeLookupName(rawName);
         if (!RULE_NAME_PATTERN.matcher(normalized).matches()) {
             throw new IllegalArgumentException(
                     "Rule name must be 1-" + MAX_RULE_NAME_LENGTH
