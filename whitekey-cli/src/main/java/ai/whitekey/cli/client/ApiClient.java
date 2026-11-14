@@ -90,7 +90,8 @@ public class ApiClient {
     }
 
     public void deleteCredential(String name) {
-        delete(PATH_CREDENTIALS + "/" + name);
+        String encoded = URLEncoder.encode(name, StandardCharsets.UTF_8).replace("+", "%20");
+        delete(PATH_CREDENTIALS + "/" + encoded);
     }
 
     public List<Action> getPendingApprovals() {
