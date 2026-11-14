@@ -9,6 +9,4 @@ import java.util.UUID;
 public interface CredentialRepository extends JpaRepository<CredentialEntity, UUID> {
 
     Optional<CredentialEntity> findByName(String name);
-
-    void deleteByName(String name);
 }
