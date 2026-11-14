@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 @Component
 public final class PolicyDecisionEngine {
@@ -51,12 +52,8 @@ public final class PolicyDecisionEngine {
             URI url,
             HttpHeaders headers,
             List<HttpRuleEntity> rules) {
-        List<HttpRuleEntity> sorted = rules.stream()
-                .sorted(Comparator.comparing(HttpRuleEntity::getId, Comparator.nullsLast(Comparator.naturalOrder())))
-                .toList();
-
         List<HttpRuleEntity> headerMatchedRules = new ArrayList<>();
-        for (HttpRuleEntity rule : sorted) {
+        for (HttpRuleEntity rule : sortRules(rules)) {
             if (rule.getEffect() == null) {
                 return new HeaderEvaluation(
                         false,
@@ -106,20 +103,7 @@ public final class PolicyDecisionEngine {
     }
 
     public Decision evaluateHttp(HttpActionEntity action, List<HttpRuleEntity> rules) {
-        List<MatchedRule> matched = new ArrayList<>();
-        for (HttpRuleEntity rule :
-                rules.stream().sorted(Comparator.comparing(HttpRuleEntity::getId, Comparator.nullsLast(Comparator.naturalOrder()))).toList()) {
-            if (rule.getEffect() == null) {
-                return new Decision(
-                        RuleEffect.DENY,
-                        "Invalid applicable rule " + rule.getId() + ": " + RuleEffect.ERROR_EFFECT_REQUIRED,
-                        List.of());
-            }
-            if (matchesHttp(action, rule)) {
-                matched.add(new MatchedRule(rule.getId(), rule.getEffect()));
-            }
-        }
-        return resolveDecision(matched);
+        return evaluateRules(rules, rule -> matchesHttp(action, rule));
     }
 
     public Decision evaluateWithBodyFile(
@@ -128,23 +112,29 @@ public final class PolicyDecisionEngine {
             HttpHeaders headers,
             Path bodyFile,
             List<HttpRuleEntity> rules) {
-        List<MatchedRule> matched = new ArrayList<>();
-        List<HttpRuleEntity> sorted = rules.stream()
-                .sorted(Comparator.comparing(HttpRuleEntity::getId, Comparator.nullsLast(Comparator.naturalOrder())))
-                .toList();
+        return evaluateRules(rules, rule -> matchesHeaders(method, url, headers, rule) && matchesBody(rule, bodyFile));
+    }
 
-        for (HttpRuleEntity rule : sorted) {
+    private Decision evaluateRules(List<HttpRuleEntity> rules, Predicate<HttpRuleEntity> matcher) {
+        List<MatchedRule> matched = new ArrayList<>();
+        for (HttpRuleEntity rule : sortRules(rules)) {
             if (rule.getEffect() == null) {
                 return new Decision(
                         RuleEffect.DENY,
                         "Invalid applicable rule " + rule.getId() + ": " + RuleEffect.ERROR_EFFECT_REQUIRED,
                         List.of());
             }
-            if (matchesHeaders(method, url, headers, rule) && matchesBody(rule, bodyFile)) {
+            if (matcher.test(rule)) {
                 matched.add(new MatchedRule(rule.getId(), rule.getEffect()));
             }
         }
         return resolveDecision(matched);
+    }
+
+    private static List<HttpRuleEntity> sortRules(List<HttpRuleEntity> rules) {
+        return rules.stream()
+                .sorted(Comparator.comparing(HttpRuleEntity::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
     }
 
     private Decision resolveDecision(List<MatchedRule> matched) {
