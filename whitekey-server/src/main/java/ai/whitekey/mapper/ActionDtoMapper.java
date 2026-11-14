@@ -1,14 +1,10 @@
 package ai.whitekey.mapper;
 
 import ai.whitekey.api.dto.Action;
-import ai.whitekey.api.dto.ApprovalRequest;
 import ai.whitekey.api.dto.HttpAction;
-import ai.whitekey.api.dto.HttpApprovalRequest;
 import ai.whitekey.api.dto.ProtocolConstants;
 import ai.whitekey.entity.ActionEntity;
-import ai.whitekey.entity.ApprovalRequestEntity;
 import ai.whitekey.entity.HttpActionEntity;
-import ai.whitekey.entity.HttpApprovalRequestEntity;
 
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -60,7 +56,6 @@ public class ActionDtoMapper {
             entity.getId() != null ? entity.getId().toString() : null,
             ProtocolConstants.HTTP,
             entity.getStatus() != null ? entity.getStatus().name() : null,
-            entity.getReason(),
             entity.getMethod() != null ? entity.getMethod().name() : null,
             entity.getUri(),
             entity.getHost(),
@@ -69,22 +64,6 @@ public class ActionDtoMapper {
             entity.getQueryParams(),
             headers,
             bodyString);
-    }
-
-    public ApprovalRequest toApprovalRequestDto(ApprovalRequestEntity entity) {
-        if (entity == null) {
-            return null;
-        }
-        if (entity instanceof HttpApprovalRequestEntity httpApproval) {
-            HttpAction httpAction = httpApproval.getAction() != null ? toHttpActionDto(httpApproval.getAction()) : null;
-            return new HttpApprovalRequest(
-                    entity.getId() != null ? entity.getId().toString() : null,
-                    ProtocolConstants.HTTP,
-                    entity.getStatus() != null ? entity.getStatus().name() : null,
-                    entity.getStatus() != null ? entity.getStatus().message() : null,
-                    httpAction);
-        }
-        throw new IllegalStateException("Unsupported approval request entity type: " + entity.getClass().getName());
     }
 
     private boolean isTextPayload(HttpActionEntity entity) {

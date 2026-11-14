@@ -18,13 +18,12 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.UUID;
 
 @Service
 public class PolicyEvaluationService {
     private static final String SETUP_APPROVAL_REASON = "Setup connection requires approval";
 
-    public record EvaluationResult(RuleEffect effect, String reason, HttpActionEntity action, UUID approvalId) {}
+    public record EvaluationResult(RuleEffect effect, String reason, HttpActionEntity action) {}
 
     public record HeaderEvaluationResult(
             boolean needsBody,
@@ -33,14 +32,12 @@ public class PolicyEvaluationService {
 
     private final RuleService rules;
     private final ActionService actions;
-    private final ApprovalRequestService approvals;
     private final SetupService setupService;
     private final PolicyDecisionEngine engine;
 
-    public PolicyEvaluationService(RuleService rules, ActionService actions, ApprovalRequestService approvals, SetupService setupService, PolicyDecisionEngine engine) {
+    public PolicyEvaluationService(RuleService rules, ActionService actions, SetupService setupService, PolicyDecisionEngine engine) {
         this.rules = rules;
         this.actions = actions;
-        this.approvals = approvals;
         this.setupService = setupService;
         this.engine = engine;
     }
@@ -63,19 +60,18 @@ public class PolicyEvaluationService {
 
         if (!setup && decision.effect() != RuleEffect.REQUIRE_APPROVAL) {
             ActionStatus status = decision.effect() == RuleEffect.ALLOW ? ActionStatus.ALLOWED : ActionStatus.DENIED;
-            HttpActionEntity action = actions.recordHttp(method, url, headers, null, status, decision.reason());
+            HttpActionEntity action = actions.recordHttp(method, url, headers, null, status);
             return new HeaderEvaluationResult(
                     false,
-                    new EvaluationResult(decision.effect(), decision.reason(), action, null),
+                    new EvaluationResult(decision.effect(), decision.reason(), action),
                     headerEval.candidateRules());
         }
 
         String reason = setup ? SETUP_APPROVAL_REASON : decision.reason();
-        HttpActionEntity action = actions.recordHttp(method, url, headers, null, ActionStatus.AWAITING_APPROVAL, reason);
-        var approval = approvals.createRequest(action);
+        HttpActionEntity action = actions.recordHttp(method, url, headers, null, ActionStatus.AWAITING_APPROVAL);
         return new HeaderEvaluationResult(
                 false,
-                new EvaluationResult(RuleEffect.REQUIRE_APPROVAL, reason, action, approval.getId()),
+                new EvaluationResult(RuleEffect.REQUIRE_APPROVAL, reason, action),
                 headerEval.candidateRules());
     }
 
@@ -92,14 +88,13 @@ public class PolicyEvaluationService {
 
         if (!setup && decision.effect() != RuleEffect.REQUIRE_APPROVAL) {
             ActionStatus status = decision.effect() == RuleEffect.ALLOW ? ActionStatus.ALLOWED : ActionStatus.DENIED;
-            HttpActionEntity action = actions.recordHttp(method, url, headers, bodyBytes, status, decision.reason());
-            return new EvaluationResult(decision.effect(), decision.reason(), action, null);
+            HttpActionEntity action = actions.recordHttp(method, url, headers, bodyBytes, status);
+            return new EvaluationResult(decision.effect(), decision.reason(), action);
         }
 
         String reason = setup ? SETUP_APPROVAL_REASON : decision.reason();
-        HttpActionEntity action = actions.recordHttp(method, url, headers, bodyBytes, ActionStatus.AWAITING_APPROVAL, reason);
-        var approval = approvals.createRequest(action);
-        return new EvaluationResult(RuleEffect.REQUIRE_APPROVAL, reason, action, approval.getId());
+        HttpActionEntity action = actions.recordHttp(method, url, headers, bodyBytes, ActionStatus.AWAITING_APPROVAL);
+        return new EvaluationResult(RuleEffect.REQUIRE_APPROVAL, reason, action);
     }
 
     private static byte[] readBodySilently(Path bodyFile) {

@@ -53,8 +53,8 @@ public class HttpRuleEntity extends RuleEntity {
     protected HttpRuleEntity() {}
 
     public HttpRuleEntity(
+            String name,
             RuleEffect effect,
-            String description,
             List<HttpMethod> methods,
             List<String> hosts,
             List<Integer> ports,
@@ -62,7 +62,7 @@ public class HttpRuleEntity extends RuleEntity {
             Map<String, List<String>> queryParams,
             HttpHeaders headers,
             String bodyCondition) {
-        super(effect, description);
+        super(name, effect);
         this.methods = methods != null ? new ArrayList<>(methods) : new ArrayList<>();
         this.hosts = hosts != null ? new ArrayList<>(hosts) : new ArrayList<>();
         this.ports = ports != null ? new ArrayList<>(ports) : new ArrayList<>();
@@ -70,18 +70,6 @@ public class HttpRuleEntity extends RuleEntity {
         this.queryParams = queryParams != null ? new LinkedHashMap<>(queryParams) : new LinkedHashMap<>();
         this.headers = headers != null ? HttpHeaders.readOnlyHttpHeaders(headers) : HttpHeaders.EMPTY;
         this.bodyCondition = (bodyCondition != null && !bodyCondition.isBlank()) ? bodyCondition.trim() : null;
-    }
-
-    public HttpRuleEntity(
-            RuleEffect effect,
-            List<HttpMethod> methods,
-            List<String> hosts,
-            List<Integer> ports,
-            List<String> paths,
-            Map<String, List<String>> queryParams,
-            HttpHeaders headers,
-            String bodyCondition) {
-        this(effect, null, methods, hosts, ports, paths, queryParams, headers, bodyCondition);
     }
 
     public List<HttpMethod> getMethods() {

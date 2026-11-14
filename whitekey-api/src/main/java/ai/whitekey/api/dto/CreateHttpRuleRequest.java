@@ -7,9 +7,9 @@ import java.util.Map;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record CreateHttpRuleRequest(
+        String name,
         String type,
         String effect,
-        String description,
         List<String> methods,
         List<String> hosts,
         List<Integer> ports,
@@ -25,14 +25,14 @@ public record CreateHttpRuleRequest(
     }
 
     public CreateHttpRuleRequest(
+            String name,
             String type,
             String effect,
-            String description,
             List<String> methods,
             List<String> hosts,
             List<Integer> ports,
             List<String> paths,
             String bodyCondition) {
-        this(type, effect, description, methods, hosts, ports, paths, null, null, bodyCondition);
+        this(name, type, effect, methods, hosts, ports, paths, null, null, bodyCondition);
     }
 }

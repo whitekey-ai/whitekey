@@ -13,7 +13,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
         @JsonSubTypes.Type(value = CreateHttpRuleRequest.class, name = ProtocolConstants.HTTP)
 })
 public sealed interface CreateRuleRequest permits CreateHttpRuleRequest {
+    String name();
     String type();
     String effect();
-    String description();
 }

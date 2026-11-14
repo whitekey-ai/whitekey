@@ -7,7 +7,7 @@ import java.util.Map;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record HttpRule(
-        String id,
+        String name,
         String type,
         String effect,
         List<String> methods,
@@ -16,8 +16,7 @@ public record HttpRule(
         List<String> paths,
         Map<String, List<String>> queryParams,
         Map<String, List<String>> headers,
-        String bodyCondition,
-        String description
+        String bodyCondition
 ) implements Rule {
     public HttpRule {
         if (type == null || type.isBlank()) {

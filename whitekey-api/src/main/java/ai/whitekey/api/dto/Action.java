@@ -15,5 +15,4 @@ public sealed interface Action permits HttpAction {
     String id();
     String type();
     String status();
-    String reason();
 }

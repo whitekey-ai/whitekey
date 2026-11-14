@@ -1,7 +1,5 @@
 package ai.whitekey.service;
 
-import ai.whitekey.entity.ApprovalRequestStatus;
-
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -13,25 +11,25 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class ApprovalWaitRegistry {
 
-    private final ConcurrentHashMap<UUID, CompletableFuture<ApprovalRequestStatus>> waiters =
+    private final ConcurrentHashMap<UUID, CompletableFuture<Void>> waiters =
             new ConcurrentHashMap<>();
 
-    public CompletableFuture<ApprovalRequestStatus> register(UUID approvalId) {
-        var future = new CompletableFuture<ApprovalRequestStatus>();
-        waiters.put(approvalId, future);
+    public CompletableFuture<Void> register(UUID actionId) {
+        var future = new CompletableFuture<Void>();
+        waiters.put(actionId, future);
         return future;
     }
 
-    public void unregister(UUID approvalId, CompletableFuture<ApprovalRequestStatus> future) {
-        waiters.remove(approvalId, future);
+    public void unregister(UUID actionId, CompletableFuture<Void> future) {
+        waiters.remove(actionId, future);
     }
 
-    public void notifyResolved(UUID approvalId, ApprovalRequestStatus status) {
+    public void notifyResolved(UUID actionId) {
         runAfterCommit(
                 () -> {
-                    var future = waiters.remove(approvalId);
+                    var future = waiters.remove(actionId);
                     if (future != null) {
-                        future.complete(status);
+                        future.complete(null);
                     }
                 });
     }

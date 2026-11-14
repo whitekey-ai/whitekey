@@ -1,13 +1,10 @@
 package ai.whitekey.proxy;
 
-import ai.whitekey.entity.ApprovalRequestEntity;
+import ai.whitekey.entity.ActionEntity;
 import ai.whitekey.entity.ActionStatus;
-import ai.whitekey.entity.ApprovalRequestStatus;
-import ai.whitekey.entity.HttpActionEntity;
 import ai.whitekey.entity.RuleEffect;
 import ai.whitekey.policy.HttpPolicyValidator;
 import ai.whitekey.service.ActionService;
-import ai.whitekey.service.ApprovalRequestService;
 import ai.whitekey.service.ApprovalWaitRegistry;
 import ai.whitekey.service.CredentialInjectionService;
 import ai.whitekey.service.PolicyEvaluationService;
@@ -88,7 +85,6 @@ public class AgentProxyService {
     private final HttpPolicyValidator validator;
     private final PolicyEvaluationService evaluationService;
     private final ActionService actionService;
-    private final ApprovalRequestService approvalService;
     private final ApprovalWaitRegistry waitRegistry;
     private final CredentialInjectionService credentialInjectionService;
     private final HttpClient httpClient;
@@ -97,13 +93,11 @@ public class AgentProxyService {
             HttpPolicyValidator validator,
             PolicyEvaluationService evaluationService,
             ActionService actionService,
-            ApprovalRequestService approvalService,
             ApprovalWaitRegistry waitRegistry,
             CredentialInjectionService credentialInjectionService) {
         this.validator = validator;
         this.evaluationService = evaluationService;
         this.actionService = actionService;
-        this.approvalService = approvalService;
         this.waitRegistry = waitRegistry;
         this.credentialInjectionService = credentialInjectionService;
         this.httpClient =
@@ -149,6 +143,59 @@ public class AgentProxyService {
             boolean needsBody,
             EvaluationResult evaluationResult,
             ProxyResponse immediateError) {}
+
+    public PreparedRequest prepareConnect(String rawAuthority, HttpHeaders requestHeaders) {
+        ProxyTarget target;
+        URI targetUri;
+        HttpHeaders cleanHeaders;
+        try {
+            target = ProxyTarget.parseConnect(rawAuthority);
+            validator.host(target.host());
+            targetUri = target.toUri(null);
+            cleanHeaders = sanitizeRequestHeaders(requestHeaders);
+        } catch (IllegalArgumentException error) {
+            return new PreparedRequest(
+                    null, null, null, null, false, null,
+                    ProxyResponse.jsonError(HttpStatus.BAD_REQUEST.value(), ERROR_INVALID_REQUEST, error.getMessage()));
+        }
+
+        HttpMethod connect = HttpMethod.valueOf(io.netty.handler.codec.http.HttpMethod.CONNECT.name());
+        HeaderEvaluationResult headerEval = evaluationService.evaluateHeaders(connect, targetUri, cleanHeaders);
+        EvaluationResult result = headerEval.needsBody()
+                ? evaluationService.evaluateWithBodyFile(connect, targetUri, cleanHeaders, null)
+                : headerEval.finalResult();
+
+        if (result.effect() == RuleEffect.DENY) {
+            return new PreparedRequest(
+                    target, targetUri, connect, cleanHeaders, false, result,
+                    ProxyResponse.jsonError(HttpStatus.FORBIDDEN.value(), ERROR_POLICY_DENIED, result.reason()));
+        }
+
+        return new PreparedRequest(target, targetUri, connect, cleanHeaders, false, result, null);
+    }
+
+    /**
+     * Waits for human approval if required and verifies the client is still connected before tunneling.
+     *
+     * @return {@code null} when authorized to connect upstream, or an error response to return to the client
+     */
+    public ProxyResponse authorizeTunnel(
+            PreparedRequest prep,
+            CompletableFuture<Void> clientDisconnected) {
+        UUID actionId = prep.evaluationResult().action().getId();
+        if (prep.evaluationResult().effect() == RuleEffect.REQUIRE_APPROVAL) {
+            ProxyResponse waitError = awaitApproval(actionId, clientDisconnected);
+            if (waitError != null) {
+                return waitError;
+            }
+        }
+        if (clientDisconnected.isDone()) {
+            String reason = "Client closed connection before execution";
+            actionService.updateStatus(actionId, ActionStatus.CANCELLED);
+            return ProxyResponse.jsonError(HTTP_CLIENT_CLOSED_REQUEST, ERROR_CLIENT_DISCONNECTED, reason);
+        }
+        return null;
+    }
 
     public PreparedRequest prepare(
             String method,
@@ -200,17 +247,17 @@ public class AgentProxyService {
             return ProxyResponse.jsonError(HttpStatus.FORBIDDEN.value(), ERROR_POLICY_DENIED, decision.reason());
         }
 
+        UUID actionId = decision.action().getId();
         if (decision.effect() == RuleEffect.REQUIRE_APPROVAL) {
-            ProxyResponse waitError = awaitApproval(decision.approvalId(), clientDisconnected);
+            ProxyResponse waitError = awaitApproval(actionId, clientDisconnected);
             if (waitError != null) {
                 return waitError;
             }
         }
 
-        UUID actionId = decision.action().getId();
         if (clientDisconnected.isDone()) {
             String reason = "Client closed connection before execution";
-            actionService.updateStatus(actionId, ActionStatus.CANCELLED, reason);
+            actionService.updateStatus(actionId, ActionStatus.CANCELLED);
             return ProxyResponse.jsonError(HTTP_CLIENT_CLOSED_REQUEST, ERROR_CLIENT_DISCONNECTED, reason);
         }
 
@@ -230,18 +277,18 @@ public class AgentProxyService {
             String proxyBaseUrl,
             InputStream bodyStream,
             CompletableFuture<Void> clientDisconnected) {
-        if (prep.evaluationResult() != null && prep.evaluationResult().effect() == RuleEffect.REQUIRE_APPROVAL) {
-            ProxyResponse waitError = awaitApproval(prep.evaluationResult().approvalId(), clientDisconnected);
+        UUID actionId = prep.evaluationResult().action().getId();
+        if (prep.evaluationResult().effect() == RuleEffect.REQUIRE_APPROVAL) {
+            ProxyResponse waitError = awaitApproval(actionId, clientDisconnected);
             if (waitError != null) {
                 return waitError;
             }
         }
 
-        UUID actionId = prep.evaluationResult().action().getId();
         if (clientDisconnected.isDone()) {
             String reason = "Client closed connection before execution";
-            actionService.updateStatus(actionId, ActionStatus.CANCELLED, reason);
-            return ProxyResponse.jsonError(HTTP_CLIENT_CLOSED_REQUEST, "client_disconnected", reason);
+            actionService.updateStatus(actionId, ActionStatus.CANCELLED);
+            return ProxyResponse.jsonError(HTTP_CLIENT_CLOSED_REQUEST, ERROR_CLIENT_DISCONNECTED, reason);
         }
 
         HttpRequest.BodyPublisher publisher =
@@ -254,25 +301,26 @@ public class AgentProxyService {
 
 
     private ProxyResponse awaitApproval(
-            UUID approvalId, CompletableFuture<Void> clientDisconnected) {
+            UUID actionId, CompletableFuture<Void> clientDisconnected) {
+        String disconnectReason = "Client closed connection before approval";
         while (true) {
             if (clientDisconnected.isDone()) {
-                expire(approvalId, ApprovalRequestStatus.CLIENT_DISCONNECTED);
+                expire(actionId, ActionStatus.CANCELLED);
                 return ProxyResponse.jsonError(
-                        HTTP_CLIENT_CLOSED_REQUEST, ERROR_CLIENT_DISCONNECTED, "Client closed connection before approval");
+                        HTTP_CLIENT_CLOSED_REQUEST, ERROR_CLIENT_DISCONNECTED, disconnectReason);
             }
 
-            CompletableFuture<ApprovalRequestStatus> waiter = waitRegistry.register(approvalId);
+            CompletableFuture<Void> waiter = waitRegistry.register(actionId);
             try {
                 if (clientDisconnected.isDone()) {
-                    expire(approvalId, ApprovalRequestStatus.CLIENT_DISCONNECTED);
+                    expire(actionId, ActionStatus.CANCELLED);
                     return ProxyResponse.jsonError(
-                            HTTP_CLIENT_CLOSED_REQUEST, ERROR_CLIENT_DISCONNECTED, "Client closed connection before approval");
+                            HTTP_CLIENT_CLOSED_REQUEST, ERROR_CLIENT_DISCONNECTED, disconnectReason);
                 }
 
                 // Re-check DB right after registering waiter to prevent any missed wakeup race
-                ApprovalRequestEntity current = approvalService.getRequest(approvalId);
-                if (current.getStatus() != ApprovalRequestStatus.PENDING) {
+                ActionEntity current = actionService.getAction(actionId);
+                if (current.getStatus() != ActionStatus.AWAITING_APPROVAL) {
                     return resolveOutcome(current);
                 }
 
@@ -285,42 +333,44 @@ public class AgentProxyService {
                 }
 
                 if (clientDisconnected.isDone()) {
-                    expire(approvalId, ApprovalRequestStatus.CLIENT_DISCONNECTED);
+                    expire(actionId, ActionStatus.CANCELLED);
                     return ProxyResponse.jsonError(
-                            HTTP_CLIENT_CLOSED_REQUEST, ERROR_CLIENT_DISCONNECTED, "Client closed connection before approval");
+                            HTTP_CLIENT_CLOSED_REQUEST, ERROR_CLIENT_DISCONNECTED, disconnectReason);
                 }
 
-                ApprovalRequestEntity updated = approvalService.getRequest(approvalId);
-                if (updated.getStatus() != ApprovalRequestStatus.PENDING) {
+                ActionEntity updated = actionService.getAction(actionId);
+                if (updated.getStatus() != ActionStatus.AWAITING_APPROVAL) {
                     return resolveOutcome(updated);
                 }
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
-                expire(approvalId, ApprovalRequestStatus.CLIENT_DISCONNECTED);
+                expire(actionId, ActionStatus.CANCELLED);
                 return ProxyResponse.jsonError(HttpStatus.SERVICE_UNAVAILABLE.value(), ERROR_INTERRUPTED, "Request interrupted");
             } catch (ExecutionException error) {
                 return ProxyResponse.jsonError(HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_APPROVAL_ERROR, "Failed waiting for approval");
             } finally {
-                waitRegistry.unregister(approvalId, waiter);
+                waitRegistry.unregister(actionId, waiter);
             }
         }
     }
 
-    private ProxyResponse resolveOutcome(ApprovalRequestEntity response) {
-        return switch (response.getStatus()) {
-            case APPROVED -> null; // Proceed to forward!
-            case REJECTED ->
-                    ProxyResponse.jsonError(HttpStatus.FORBIDDEN.value(), ERROR_APPROVAL_REJECTED, response.getStatus().message());
-            case CLIENT_DISCONNECTED, APPROVAL_TIMEOUT, SETUP_SESSION_ENDED ->
-                    ProxyResponse.jsonError(HttpStatus.CONFLICT.value(), ERROR_APPROVAL_EXPIRED, response.getStatus().message());
-            case PENDING ->
+    private ProxyResponse resolveOutcome(ActionEntity action) {
+        return switch (action.getStatus()) {
+            case ALLOWED -> null; // Proceed to forward!
+            case DENIED ->
+                    ProxyResponse.jsonError(HttpStatus.FORBIDDEN.value(), ERROR_APPROVAL_REJECTED, "Human approval rejected");
+            case EXPIRED ->
+                    ProxyResponse.jsonError(HttpStatus.CONFLICT.value(), ERROR_APPROVAL_EXPIRED, "Approval expired before completion");
+            case CANCELLED ->
+                    ProxyResponse.jsonError(HTTP_CLIENT_CLOSED_REQUEST, ERROR_CLIENT_DISCONNECTED, "Client closed connection before approval");
+            case AWAITING_APPROVAL, FAILED ->
                     ProxyResponse.jsonError(HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_APPROVAL_PENDING, "Approval still pending");
         };
     }
 
-    private void expire(UUID approvalId, ApprovalRequestStatus status) {
+    private void expire(UUID actionId, ActionStatus status) {
         try {
-            approvalService.expireUnexecutedRequest(approvalId, status);
+            actionService.expirePendingAction(actionId, status);
         } catch (Exception ignored) {
         }
     }
@@ -383,20 +433,20 @@ public class AgentProxyService {
                     upstream.body());
         } catch (SSLException sslError) {
             String reason = "Upstream TLS handshake failed";
-            actionService.updateStatus(actionId, ActionStatus.FAILED, reason);
+            actionService.updateStatus(actionId, ActionStatus.FAILED);
             return ProxyResponse.jsonError(HttpStatus.BAD_GATEWAY.value(), ERROR_UPSTREAM_TLS_FAILED, reason);
         } catch (ConnectException connectError) {
             String reason = "Could not connect to upstream host";
-            actionService.updateStatus(actionId, ActionStatus.FAILED, reason);
+            actionService.updateStatus(actionId, ActionStatus.FAILED);
             return ProxyResponse.jsonError(HttpStatus.BAD_GATEWAY.value(), ERROR_UPSTREAM_CONNECT_FAILED, reason);
         } catch (IOException ioError) {
             String reason = "Upstream request failed or timed out";
-            actionService.updateStatus(actionId, ActionStatus.FAILED, reason);
+            actionService.updateStatus(actionId, ActionStatus.FAILED);
             return ProxyResponse.jsonError(HttpStatus.BAD_GATEWAY.value(), ERROR_UPSTREAM_IO_FAILED, reason);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             String reason = "Upstream request interrupted";
-            actionService.updateStatus(actionId, ActionStatus.CANCELLED, reason);
+            actionService.updateStatus(actionId, ActionStatus.CANCELLED);
             return ProxyResponse.jsonError(HttpStatus.SERVICE_UNAVAILABLE.value(), ERROR_INTERRUPTED, reason);
         }
     }

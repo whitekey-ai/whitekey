@@ -18,12 +18,23 @@ public interface ActionRepository extends JpaRepository<ActionEntity, UUID> {
 
     List<ActionEntity> findByStatusOrderByIdDesc(ActionStatus status, Pageable pageable);
 
+    List<ActionEntity> findByStatusOrderByIdAsc(ActionStatus status, Pageable pageable);
+
+    long countByStatus(ActionStatus status);
+
     List<ActionEntity> findByStatusNot(ActionStatus status);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query("UPDATE ActionEntity a SET a.status = :status, a.reason = :reason WHERE a.id = :id")
+    @Query("UPDATE ActionEntity a SET a.status = :status WHERE a.id = :id")
     int updateStatus(
             @Param("id") UUID id,
-            @Param("status") ActionStatus status,
-            @Param("reason") String reason);
+            @Param("status") ActionStatus status);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+            "UPDATE ActionEntity a SET a.status = :status "
+                    + "WHERE a.id = :id AND a.status = ai.whitekey.entity.ActionStatus.AWAITING_APPROVAL")
+    int resolvePending(
+            @Param("id") UUID id,
+            @Param("status") ActionStatus status);
 }

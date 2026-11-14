@@ -26,19 +26,19 @@ import java.util.Map;
 public class HttpActionEntity extends ActionEntity {
 
     @Convert(converter = HttpMethodConverter.class)
-    @Column(name = "method", nullable = false, length = 32)
+    @Column(name = "method", nullable = false, columnDefinition = "TEXT")
     private HttpMethod method;
 
-    @Column(name = "uri", nullable = false, length = 4096)
+    @Column(name = "uri", nullable = false, columnDefinition = "TEXT")
     private String uri;
 
-    @Column(name = "host", nullable = false)
+    @Column(name = "host", nullable = false, columnDefinition = "TEXT")
     private String host;
 
     @Column(name = "port", nullable = false)
     private int port;
 
-    @Column(name = "path", nullable = false, length = 2048)
+    @Column(name = "path", nullable = false, columnDefinition = "TEXT")
     private String path;
 
     @JdbcTypeCode(SqlTypes.JSON)
@@ -63,10 +63,9 @@ public class HttpActionEntity extends ActionEntity {
             Map<String, List<String>> queryParams,
             HttpHeaders headers,
             byte[] body,
-            ActionStatus status,
-            String reason
+            ActionStatus status
     ) {
-        super(status, reason);
+        super(status);
         this.method = method;
         this.uri = uri;
         this.host = host;

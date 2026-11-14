@@ -52,7 +52,31 @@ public record ProxyTarget(
         int slashIndex = rest.indexOf('/');
         String authority = slashIndex >= 0 ? rest.substring(0, slashIndex) : rest;
         String targetPath = slashIndex >= 0 ? rest.substring(slashIndex) : "/";
+        int defaultPort = ProtocolConstants.HTTPS.equalsIgnoreCase(scheme) ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT;
+        return parseAuthority(authority, scheme, targetPath, rawQuery, defaultPort, false);
+    }
 
+    /**
+     * Parses an HTTP {@code CONNECT} authority-form target ({@code host:port}).
+     */
+    public static ProxyTarget parseConnect(String rawAuthority) {
+        if (rawAuthority == null || rawAuthority.isBlank()) {
+            throw new IllegalArgumentException("CONNECT target is required, e.g. example.com:443");
+        }
+        String trimmed = rawAuthority.trim();
+        if (trimmed.contains("/") || trimmed.contains("?") || trimmed.contains("#")) {
+            throw new IllegalArgumentException("CONNECT target must be authority-form (host:port)");
+        }
+        return parseAuthority(trimmed, ProtocolConstants.HTTPS, "/", null, DEFAULT_HTTPS_PORT, true);
+    }
+
+    private static ProxyTarget parseAuthority(
+            String authority,
+            String scheme,
+            String targetPath,
+            String rawQuery,
+            int defaultPort,
+            boolean forceExplicitPort) {
         if (authority.contains("@") || authority.isEmpty()) {
             throw new IllegalArgumentException("Invalid target host");
         }
@@ -76,8 +100,8 @@ public record ProxyTarget(
             throw new IllegalArgumentException("Invalid target host");
         } else {
             host = authority.toLowerCase(Locale.ROOT);
-            port = ProtocolConstants.HTTPS.equalsIgnoreCase(scheme) ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT;
-            explicitPort = false;
+            port = defaultPort;
+            explicitPort = forceExplicitPort;
         }
 
         return new ProxyTarget(scheme, host, port, explicitPort, targetPath, rawQuery);

@@ -6,6 +6,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.Inheritance;
 import jakarta.persistence.InheritanceType;
 import jakarta.persistence.Table;
@@ -15,7 +16,11 @@ import org.hibernate.annotations.UuidGenerator;
 import java.util.UUID;
 
 @Entity
-@Table(name = "agent_rule")
+@Table(
+        name = "agent_rule",
+        indexes = {
+                @Index(name = "idx_rule_name", columnList = "name", unique = true)
+        })
 @Inheritance(strategy = InheritanceType.JOINED)
 public abstract class RuleEntity {
 
@@ -24,22 +29,30 @@ public abstract class RuleEntity {
     @UuidGenerator(style = UuidGenerator.Style.VERSION_7)
     private UUID id;
 
+    @Column(name = "name", nullable = false, unique = true)
+    private String name;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "effect", nullable = false)
     private RuleEffect effect;
 
-    @Column(name = "description")
-    private String description;
-
     protected RuleEntity() {}
 
-    protected RuleEntity(RuleEffect effect, String description) {
+    protected RuleEntity(String name, RuleEffect effect) {
+        this.name = name;
         this.effect = effect;
-        this.description = description;
     }
 
     public UUID getId() {
         return id;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
     }
 
     public RuleEffect getEffect() {
@@ -48,14 +61,6 @@ public abstract class RuleEntity {
 
     public void setEffect(RuleEffect effect) {
         this.effect = effect;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
     }
 
     public abstract String getType();

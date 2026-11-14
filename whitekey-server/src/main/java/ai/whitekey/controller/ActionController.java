@@ -1,15 +1,20 @@
 package ai.whitekey.controller;
 
 import ai.whitekey.api.dto.Action;
+import ai.whitekey.api.dto.ResolveActionRequest;
 import ai.whitekey.entity.ActionStatus;
 import ai.whitekey.mapper.ActionDtoMapper;
 import ai.whitekey.service.ActionService;
 import ai.whitekey.service.PageRequests;
 
+import jakarta.validation.Valid;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -46,6 +51,13 @@ public class ActionController {
     @GetMapping("/{id}")
     public Action get(@PathVariable UUID id) {
         return mapper.toActionDto(service.getAction(id));
+    }
+
+    @PostMapping("/{id}/resolve")
+    public Action resolve(
+            @PathVariable UUID id, @Valid @RequestBody ResolveActionRequest request) {
+        return mapper.toActionDto(
+                service.resolveAction(id, request.decision(), request.saveRule()));
     }
 
     @DeleteMapping

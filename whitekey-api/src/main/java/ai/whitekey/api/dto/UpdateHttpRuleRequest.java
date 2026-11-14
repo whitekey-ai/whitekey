@@ -7,6 +7,7 @@ import java.util.Map;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record UpdateHttpRuleRequest(
+        String name,
         String effect,
         List<String> methods,
         List<String> hosts,

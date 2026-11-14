@@ -2,8 +2,7 @@ package ai.whitekey.controller;
 
 import ai.whitekey.api.dto.Status;
 import ai.whitekey.proxy.AgentProxyServer;
-import ai.whitekey.service.ApprovalRequestService;
-import ai.whitekey.service.PageRequests;
+import ai.whitekey.service.ActionService;
 import ai.whitekey.service.RuleService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -15,15 +14,15 @@ public class StatusController {
 
     private final AgentProxyServer proxyServer;
     private final RuleService ruleService;
-    private final ApprovalRequestService approvalService;
+    private final ActionService actionService;
 
     public StatusController(
             AgentProxyServer proxyServer,
             RuleService ruleService,
-            ApprovalRequestService approvalService) {
+            ActionService actionService) {
         this.proxyServer = proxyServer;
         this.ruleService = ruleService;
-        this.approvalService = approvalService;
+        this.actionService = actionService;
     }
 
     @GetMapping
@@ -31,7 +30,7 @@ public class StatusController {
         boolean running = proxyServer.isRunning();
         int port = proxyServer.getBoundPort();
         int rulesCount = ruleService.getRules().size();
-        int pendingApprovals = approvalService.getRequests(0, PageRequests.MAX_PAGE_SIZE, true).size();
+        int pendingApprovals = actionService.countPendingApprovals();
         return new Status(running, port, rulesCount, pendingApprovals);
     }
 }

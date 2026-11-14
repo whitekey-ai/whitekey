@@ -1,8 +1,10 @@
 package ai.whitekey.controller;
 
 import ai.whitekey.exception.ApprovalConflictException;
+import ai.whitekey.exception.ConflictException;
 import ai.whitekey.exception.ResourceNotFoundException;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -24,10 +26,16 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(ex.getMessage() != null ? ex.getMessage() : DEFAULT_NOT_FOUND_MESSAGE));
     }
 
-    @ExceptionHandler(ApprovalConflictException.class)
-    public ResponseEntity<ErrorResponse> conflict(ApprovalConflictException exception) {
+    @ExceptionHandler({ApprovalConflictException.class, ConflictException.class})
+    public ResponseEntity<ErrorResponse> conflict(RuntimeException exception) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ErrorResponse(exception.getMessage()));
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorResponse> dataIntegrityConflict(DataIntegrityViolationException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse("Resource conflict"));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

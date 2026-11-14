@@ -1,9 +1,7 @@
 package ai.whitekey.service;
 
 import ai.whitekey.entity.ActionEntity;
-import ai.whitekey.entity.ApprovalRequestEntity;
 import ai.whitekey.entity.HttpActionEntity;
-import ai.whitekey.entity.HttpApprovalRequestEntity;
 import ai.whitekey.entity.RuleEffect;
 import ai.whitekey.exception.ApprovalConflictException;
 import ai.whitekey.policy.PolicyDecisionEngine;
@@ -30,11 +28,6 @@ public class HttpApprovalHandler implements ProtocolApprovalHandler {
     @Override
     public boolean supports(ActionEntity action) {
         return action instanceof HttpActionEntity;
-    }
-
-    @Override
-    public ApprovalRequestEntity createApprovalRequest(ActionEntity action) {
-        return new HttpApprovalRequestEntity(requireHttp(action));
     }
 
     @Override
@@ -70,11 +63,18 @@ public class HttpApprovalHandler implements ProtocolApprovalHandler {
                                                         || rule.getPorts().contains(port))
                                                 && rule.getPaths().equals(List.of(path)));
         if (!exists) {
-            rules.createHttpRule(
+            String baseName = (host != null && !host.isBlank()) ? "allow_" + host : "allow_rule";
+            // Scope CONNECT tunnel rules explicitly to host + port (e.g. 443)
+            List<Integer> rulePorts = ("CONNECT".equalsIgnoreCase(method.name())
+                    || (port != ProxyTarget.DEFAULT_HTTP_PORT && port != ProxyTarget.DEFAULT_HTTPS_PORT))
+                    ? List.of(port)
+                    : List.of();
+            rules.createAutoHttpRule(
+                    baseName,
                     RuleEffect.ALLOW,
                     List.of(method),
                     List.of(host),
-                    (port == ProxyTarget.DEFAULT_HTTP_PORT || port == ProxyTarget.DEFAULT_HTTPS_PORT) ? List.of() : List.of(port),
+                    rulePorts,
                     List.of(path),
                     Map.of());
         }

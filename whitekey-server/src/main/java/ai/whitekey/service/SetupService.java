@@ -1,13 +1,11 @@
 package ai.whitekey.service;
 
+import ai.whitekey.entity.ActionEntity;
 import ai.whitekey.entity.ActionStatus;
-import ai.whitekey.entity.ApprovalRequestEntity;
-import ai.whitekey.entity.ApprovalRequestStatus;
 import ai.whitekey.entity.HttpActionEntity;
 import ai.whitekey.entity.SetupStateEntity;
 import ai.whitekey.policy.PolicyDecisionEngine;
 import ai.whitekey.repository.ActionRepository;
-import ai.whitekey.repository.ApprovalRequestRepository;
 import ai.whitekey.repository.SetupStateRepository;
 
 import org.springframework.data.domain.Pageable;
@@ -18,7 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class SetupService {
 
     private final SetupStateRepository setupRepository;
-    private final ApprovalRequestRepository approvals;
     private final ActionRepository actionRepository;
     private final RuleService rules;
     private final PolicyDecisionEngine engine;
@@ -26,14 +23,12 @@ public class SetupService {
 
     public SetupService(
             SetupStateRepository setupRepository,
-            ApprovalRequestRepository approvals,
             ActionRepository actionRepository,
             RuleService rules,
             PolicyDecisionEngine engine,
             ApprovalWaitRegistry waitRegistry
     ) {
         this.setupRepository = setupRepository;
-        this.approvals = approvals;
         this.actionRepository = actionRepository;
         this.rules = rules;
         this.engine = engine;
@@ -69,20 +64,14 @@ public class SetupService {
         setupRepository.save(setup);
 
         var currentRules = rules.getHttpRules();
-        var pending = approvals.findByStatusOrderByIdAsc(ApprovalRequestStatus.PENDING, Pageable.unpaged());
-        for (ApprovalRequestEntity request : pending) {
-            if (request.getAction() instanceof HttpActionEntity http && engine.evaluateHttp(http, currentRules).isUnmatchedAction()) {
-                int changed = approvals.updatePendingStatus(request.getId(), ApprovalRequestStatus.SETUP_SESSION_ENDED);
+        var pending = actionRepository.findByStatusOrderByIdAsc(ActionStatus.AWAITING_APPROVAL, Pageable.unpaged());
+        for (ActionEntity action : pending) {
+            if (action instanceof HttpActionEntity http && engine.evaluateHttp(http, currentRules).isUnmatchedAction()) {
+                int changed = actionRepository.resolvePending(
+                        http.getId(),
+                        ActionStatus.EXPIRED);
                 if (changed > 0) {
-                    actionRepository.updateStatus(
-                            http.getId(),
-                            ActionStatus.DENIED,
-                            ApprovalRequestStatus.SETUP_SESSION_ENDED.message()
-                    );
-                    waitRegistry.notifyResolved(
-                            request.getId(),
-                            ApprovalRequestStatus.SETUP_SESSION_ENDED
-                    );
+                    waitRegistry.notifyResolved(http.getId());
                 }
             }
         }

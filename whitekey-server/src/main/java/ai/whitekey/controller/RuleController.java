@@ -28,7 +28,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.Locale;
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/rules")
@@ -58,8 +57,8 @@ public class RuleController {
                     : List.of();
             HttpHeaders headers = httpReq.headers() != null ? validator.headers(httpReq.headers()) : HttpHeaders.EMPTY;
             HttpRuleEntity created = rules.createHttpRule(
+                    httpReq.name(),
                     effect,
-                    httpReq.description(),
                     methods,
                     httpReq.hosts(),
                     httpReq.ports(),
@@ -72,21 +71,22 @@ public class RuleController {
         throw new IllegalArgumentException("Unsupported rule request type: " + request.getClass().getName());
     }
 
-    @GetMapping("/{ruleId}")
-    public Rule get(@PathVariable UUID ruleId) {
-        return ruleDtoMapper.toRuleDto(rules.getRule(ruleId));
+    @GetMapping("/{name}")
+    public Rule get(@PathVariable String name) {
+        return ruleDtoMapper.toRuleDto(rules.getRule(name));
     }
 
-    @PatchMapping("/{ruleId}")
+    @PatchMapping("/{name}")
     public Rule update(
-            @PathVariable UUID ruleId, @Valid @RequestBody UpdateHttpRuleRequest request) {
+            @PathVariable String name, @Valid @RequestBody UpdateHttpRuleRequest request) {
         RuleEffect effect = request.effect() != null ? RuleEffect.fromString(request.effect()) : null;
         List<HttpMethod> methods = request.methods() != null
                 ? request.methods().stream().map(m -> HttpMethod.valueOf(m.trim().toUpperCase(Locale.ROOT))).toList()
                 : null;
         HttpHeaders headers = request.headers() != null ? validator.headers(request.headers()) : null;
         HttpRuleEntity updated = rules.updateHttpRule(
-                ruleId,
+                name,
+                request.name(),
                 effect,
                 methods,
                 request.hosts(),
@@ -98,9 +98,9 @@ public class RuleController {
         return ruleDtoMapper.toRuleDto(updated);
     }
 
-    @DeleteMapping("/{ruleId}")
+    @DeleteMapping("/{name}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable UUID ruleId) {
-        rules.deleteRule(ruleId);
+    public void delete(@PathVariable String name) {
+        rules.deleteRule(name);
     }
 }

@@ -21,8 +21,4 @@ public class ResourceNotFoundException extends RuntimeException {
     public static ResourceNotFoundException forAction(Object id) {
         return new ResourceNotFoundException("Action not found: " + id);
     }
-
-    public static ResourceNotFoundException forApprovalRequest(Object id) {
-        return new ResourceNotFoundException("Approval request not found: " + id);
-    }
 }

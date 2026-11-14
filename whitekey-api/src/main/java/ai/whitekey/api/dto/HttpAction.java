@@ -10,7 +10,6 @@ public record HttpAction(
         String id,
         String type,
         String status,
-        String reason,
         String method,
         String uri,
         String host,

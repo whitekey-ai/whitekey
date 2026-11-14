@@ -1,14 +1,28 @@
 package ai.whitekey.proxy;
 
 import ai.whitekey.proxy.AgentProxyService.ProxyResponse;
+import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpObject;
 import io.netty.handler.codec.http.HttpRequest;
+import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.HttpServerExpectContinueHandler;
 import io.netty.handler.codec.http.HttpUtil;
+import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,7 +60,8 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
         IDLE,
         DISCARDING,
         STREAMING,
-        SPOOLING
+        SPOOLING,
+        TUNNELING
     }
 
     private final AgentProxyService proxyService;
@@ -137,6 +152,11 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
         closeListener = future -> clientDisconnected.complete(null);
         ctx.channel().closeFuture().addListener(closeListener);
 
+        if (HttpMethod.CONNECT.name().equalsIgnoreCase(currentMethod)) {
+            handleConnectRequest(ctx, rawUri, requestHeaders);
+            return;
+        }
+
         preparedRequest = proxyService.prepare(currentMethod, rawPath, rawQuery, requestHeaders);
 
         if (preparedRequest.immediateError() != null) {
@@ -195,9 +215,116 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
         }
     }
 
+    private void handleConnectRequest(
+            ChannelHandlerContext ctx, String rawUri, HttpHeaders requestHeaders) {
+        preparedRequest = proxyService.prepareConnect(rawUri, requestHeaders);
+        if (preparedRequest.immediateError() != null) {
+            ProxyResponseWriter.write(ctx, currentMethod, preparedRequest.immediateError(), false);
+            state = State.DISCARDING;
+            return;
+        }
+
+        state = State.TUNNELING;
+        virtualExecutor.execute(
+                () -> {
+                    ProxyResponse error;
+                    try {
+                        error = proxyService.authorizeTunnel(preparedRequest, clientDisconnected);
+                    } catch (Exception unexpected) {
+                        log.error("Unexpected error authorizing CONNECT tunnel", unexpected);
+                        error =
+                                ProxyResponse.jsonError(
+                                        HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_INTERNAL, MSG_INTERNAL_ERROR);
+                    }
+                    if (error != null) {
+                        sendResponseFromVirtualThread(ctx, currentMethod, error, false);
+                        return;
+                    }
+                    ProxyTarget target = preparedRequest.target();
+                    ctx.executor().execute(() -> openConnectTunnel(ctx, target.host(), target.port()));
+                });
+    }
+
+    private void openConnectTunnel(ChannelHandlerContext ctx, String host, int port) {
+        if (!ctx.channel().isActive()) {
+            cleanup(ctx);
+            return;
+        }
+        int connectTimeoutMs = (int) AgentProxyService.UPSTREAM_CONNECT_TIMEOUT.toMillis();
+        Bootstrap bootstrap =
+                new Bootstrap()
+                        .group(ctx.channel().eventLoop())
+                        .channel(NioSocketChannel.class)
+                        .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, connectTimeoutMs)
+                        .option(ChannelOption.TCP_NODELAY, true)
+                        .option(ChannelOption.AUTO_READ, false)
+                        .handler(
+                                new ChannelInitializer<SocketChannel>() {
+                                    @Override
+                                    protected void initChannel(SocketChannel ch) {}
+                                });
+
+        bootstrap.connect(host, port).addListener(
+                (ChannelFuture connectFuture) -> {
+                    if (!connectFuture.isSuccess()) {
+                        if (ctx.channel().isActive()) {
+                            ProxyResponse fail =
+                                    ProxyResponse.jsonError(
+                                            HttpStatus.BAD_GATEWAY.value(),
+                                            AgentProxyService.ERROR_UPSTREAM_CONNECT_FAILED,
+                                            "Could not connect to upstream host");
+                            ProxyResponseWriter.write(ctx, HttpMethod.CONNECT.name(), fail, false);
+                        }
+                        cleanup(ctx);
+                        return;
+                    }
+
+                    Channel outbound = connectFuture.channel();
+                    if (!ctx.channel().isActive()) {
+                        outbound.close();
+                        cleanup(ctx);
+                        return;
+                    }
+
+                    if (closeListener != null) {
+                        ctx.channel().closeFuture().removeListener(closeListener);
+                        closeListener = null;
+                    }
+
+                    ctx.channel().config().setAutoRead(false);
+                    DefaultFullHttpResponse established =
+                            new DefaultFullHttpResponse(
+                                    HttpVersion.HTTP_1_1,
+                                    new HttpResponseStatus(200, "Connection Established"));
+                    ctx.writeAndFlush(established).addListener(
+                            (ChannelFuture writeFuture) -> {
+                                if (!writeFuture.isSuccess() || !outbound.isActive() || !ctx.channel().isActive()) {
+                                    outbound.close();
+                                    ctx.close();
+                                    return;
+                                }
+                                ChannelPipeline pipeline = ctx.pipeline();
+                                if (pipeline.get(HttpServerCodec.class) != null) {
+                                    pipeline.remove(HttpServerCodec.class);
+                                }
+                                if (pipeline.get(HttpServerExpectContinueHandler.class) != null) {
+                                    pipeline.remove(HttpServerExpectContinueHandler.class);
+                                }
+                                if (pipeline.get(ProxyInboundHandler.class) != null) {
+                                    pipeline.remove(this);
+                                }
+                                pipeline.addLast(new TunnelRelayHandler(outbound));
+                                outbound.pipeline().addLast(new TunnelRelayHandler(ctx.channel()));
+
+                                outbound.config().setAutoRead(true);
+                                ctx.channel().config().setAutoRead(true);
+                            });
+                });
+    }
+
     private void handleHttpContent(
             ChannelHandlerContext ctx, io.netty.handler.codec.http.HttpContent content) {
-        if (state == State.DISCARDING) {
+        if (state == State.DISCARDING || state == State.TUNNELING) {
             return;
         }
 

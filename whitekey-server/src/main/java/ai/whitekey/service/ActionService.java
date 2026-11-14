@@ -4,10 +4,10 @@ import ai.whitekey.api.dto.ProtocolConstants;
 import ai.whitekey.entity.ActionEntity;
 import ai.whitekey.entity.ActionStatus;
 import ai.whitekey.entity.HttpActionEntity;
+import ai.whitekey.exception.ApprovalConflictException;
 import ai.whitekey.exception.ResourceNotFoundException;
 import ai.whitekey.proxy.ProxyTarget;
 import ai.whitekey.repository.ActionRepository;
-import ai.whitekey.repository.ApprovalRequestRepository;
 import ai.whitekey.repository.HttpActionRepository;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -34,17 +34,20 @@ public class ActionService {
 
     private final ActionRepository actionRepository;
     private final HttpActionRepository httpActionRepository;
-    private final ApprovalRequestRepository approvalRepository;
+    private final ApprovalWaitRegistry waitRegistry;
+    private final List<ProtocolApprovalHandler> protocolHandlers;
     private final int maxStoredBodyBytes;
 
     public ActionService(
             ActionRepository actionRepository,
             HttpActionRepository httpActionRepository,
-            ApprovalRequestRepository approvalRepository,
+            ApprovalWaitRegistry waitRegistry,
+            List<ProtocolApprovalHandler> protocolHandlers,
             @Value("${app.audit.max-body-bytes:" + DEFAULT_MAX_STORED_BODY_SIZE + "}") DataSize maxStoredBodySize) {
         this.actionRepository = actionRepository;
         this.httpActionRepository = httpActionRepository;
-        this.approvalRepository = approvalRepository;
+        this.waitRegistry = waitRegistry;
+        this.protocolHandlers = protocolHandlers;
         this.maxStoredBodyBytes = (int) (maxStoredBodySize != null ? maxStoredBodySize.toBytes() : DEFAULT_MAX_STORED_BODY_BYTES);
     }
 
@@ -54,8 +57,7 @@ public class ActionService {
             URI url,
             HttpHeaders headers,
             byte[] body,
-            ActionStatus status,
-            String reason) {
+            ActionStatus status) {
         int port = (url != null && url.getPort() != -1)
                 ? url.getPort()
                 : (url != null && ProtocolConstants.HTTPS.equalsIgnoreCase(url.getScheme())
@@ -84,14 +86,13 @@ public class ActionService {
                 queryParams,
                 safeHeaders,
                 safeBody,
-                status,
-                reason);
+                status);
         return httpActionRepository.save(entity);
     }
 
     @Transactional
-    public void updateStatus(UUID id, ActionStatus status, String reason) {
-        actionRepository.updateStatus(id, status, reason);
+    public void updateStatus(UUID id, ActionStatus status) {
+        actionRepository.updateStatus(id, status);
     }
 
     @Transactional(readOnly = true)
@@ -124,12 +125,83 @@ public class ActionService {
                 .findFiltered(status, normalizedMethod, normalizedHost, pageable));
     }
 
+    @Transactional(readOnly = true)
+    public int countPendingApprovals() {
+        return (int) actionRepository.countByStatus(ActionStatus.AWAITING_APPROVAL);
+    }
+
+    @Transactional
+    public ActionEntity resolveAction(UUID id, String decision, boolean saveRule) {
+        ActionStatus nextStatus = parseDecision(decision);
+        if (saveRule && nextStatus != ActionStatus.ALLOWED) {
+            throw new IllegalArgumentException("Only approval can save an allow rule");
+        }
+        ActionEntity action = getAction(id);
+        if (action.getStatus() != ActionStatus.AWAITING_APPROVAL) {
+            throw new ApprovalConflictException(
+                    "This action is no longer awaiting approval. Refresh and try again.");
+        }
+        if (nextStatus == ActionStatus.ALLOWED) {
+            validateApproval(action, saveRule);
+        }
+        int changed = actionRepository.resolvePending(id, nextStatus);
+        if (changed == 0) {
+            throw new ApprovalConflictException(
+                    "This action is no longer awaiting approval. Refresh and try again.");
+        }
+        if (saveRule) {
+            saveAllowRule(action);
+        }
+        ActionEntity updated = getAction(id);
+        waitRegistry.notifyResolved(id);
+        return updated;
+    }
+
+    @Transactional
+    public void expirePendingAction(UUID id, ActionStatus status) {
+        if (status != ActionStatus.CANCELLED && status != ActionStatus.EXPIRED) {
+            throw new IllegalArgumentException("Expired or cancelled status is required");
+        }
+        int changed = actionRepository.resolvePending(id, status);
+        if (changed > 0) {
+            waitRegistry.notifyResolved(id);
+        }
+    }
+
     @Transactional
     public void clearFinished() {
-        approvalRepository.deleteResolved();
         List<ActionEntity> finished = actionRepository.findByStatusNot(ActionStatus.AWAITING_APPROVAL);
         if (!finished.isEmpty()) {
             actionRepository.deleteAll(finished);
+        }
+    }
+
+    private static ActionStatus parseDecision(String decision) {
+        if (decision == null || decision.isBlank()) {
+            throw new IllegalArgumentException("Decision must not be blank");
+        }
+        return switch (decision.trim().toUpperCase(Locale.ROOT)) {
+            case "ALLOW", "APPROVED", "ALLOWED" -> ActionStatus.ALLOWED;
+            case "BLOCK", "DENIED", "REJECTED" -> ActionStatus.DENIED;
+            default -> throw new IllegalArgumentException("Invalid approval decision: " + decision);
+        };
+    }
+
+    private void validateApproval(ActionEntity action, boolean saveRule) {
+        for (ProtocolApprovalHandler handler : protocolHandlers) {
+            if (handler.supports(action)) {
+                handler.validateApproval(action, saveRule);
+                return;
+            }
+        }
+    }
+
+    private void saveAllowRule(ActionEntity action) {
+        for (ProtocolApprovalHandler handler : protocolHandlers) {
+            if (handler.supports(action)) {
+                handler.saveAllowRule(action);
+                return;
+            }
         }
     }
 }

@@ -31,14 +31,10 @@ public abstract class ActionEntity {
     @Column(name = "status", nullable = false)
     private ActionStatus status;
 
-    @Column(name = "reason", nullable = false)
-    private String reason;
-
     protected ActionEntity() {}
 
-    protected ActionEntity(ActionStatus status, String reason) {
+    protected ActionEntity(ActionStatus status) {
         this.status = status;
-        this.reason = reason;
     }
 
     public UUID getId() {
@@ -51,14 +47,6 @@ public abstract class ActionEntity {
 
     public void setStatus(ActionStatus status) {
         this.status = status;
-    }
-
-    public String getReason() {
-        return reason;
-    }
-
-    public void setReason(String reason) {
-        this.reason = reason;
     }
 
     public abstract String getType();

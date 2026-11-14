@@ -28,7 +28,7 @@ public class RuleDtoMapper {
                     ? http.getMethods().stream().map(HttpMethod::name).toList()
                     : List.of();
             return new HttpRule(
-                    http.getId() != null ? http.getId().toString() : null,
+                    http.getName(),
                     ProtocolConstants.HTTP,
                     http.getEffect() != null ? http.getEffect().name() : null,
                     methodNames,
@@ -37,8 +37,7 @@ public class RuleDtoMapper {
                     http.getPaths(),
                     http.getQueryParams(),
                     headersMap,
-                    http.getBodyCondition(),
-                    http.getDescription());
+                    http.getBodyCondition());
         }
         throw new IllegalStateException("Unsupported rule type: " + rule.getClass().getName());
     }
