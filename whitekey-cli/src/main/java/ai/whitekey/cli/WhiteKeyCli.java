@@ -1,5 +1,6 @@
 package ai.whitekey.cli;
 
+import ai.whitekey.cli.client.CliConfigDefaults;
 import picocli.CommandLine;
 
 import java.io.File;
@@ -7,7 +8,7 @@ import java.io.File;
 public class WhiteKeyCli {
 
     public static void main(String[] args) {
-        File configFile = resolveConfigFile();
+        File configFile = CliConfigDefaults.resolveConfigFile();
         CommandLine cmd = new CommandLine(new WhiteKeyRootCommand());
         cmd.setDefaultValueProvider(new CascadingDefaultProvider(configFile));
         int exitCode = cmd
@@ -31,39 +32,10 @@ public class WhiteKeyCli {
         @Override
         public String defaultValue(CommandLine.Model.ArgSpec argSpec) throws Exception {
             String key = argSpec.descriptionKey();
-            if (key != null && !key.isBlank()) {
-                String envVal = System.getenv(key);
-                if (envVal != null && !envVal.isBlank()) {
-                    return envVal.trim();
-                }
-            }
-            if (fileProvider != null) {
-                String fileVal = fileProvider.defaultValue(argSpec);
-                if (fileVal != null && !fileVal.isBlank()) {
-                    return fileVal.trim();
-                }
-            }
-            return null;
+            String envVal = (key != null && !key.isBlank()) ? System.getenv(key) : null;
+            String fileVal = fileProvider != null ? fileProvider.defaultValue(argSpec) : null;
+            return CliConfigDefaults.firstNonBlank(envVal, fileVal);
         }
-    }
-
-    private static File resolveConfigFile() {
-        File localEnv = new File(".env");
-        if (localEnv.isFile() && localEnv.canRead()) {
-            return localEnv;
-        }
-        String userHome = System.getProperty("user.home");
-        if (userHome != null) {
-            File xdgConfig = new File(userHome, ".config/whitekey/.env");
-            if (xdgConfig.isFile() && xdgConfig.canRead()) {
-                return xdgConfig;
-            }
-            File localShare = new File(userHome, ".local/share/whitekey/whitekey.env");
-            if (localShare.isFile() && localShare.canRead()) {
-                return localShare;
-            }
-        }
-        return localEnv;
     }
 }
 

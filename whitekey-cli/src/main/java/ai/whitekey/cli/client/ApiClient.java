@@ -22,8 +22,6 @@ import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
@@ -51,8 +49,8 @@ public class ApiClient {
     private final ObjectMapper objectMapper;
 
     public ApiClient(String serverUrl, String adminToken) {
-        this.serverUrl = resolveServerUrl(serverUrl);
-        this.adminToken = resolveAdminToken(adminToken);
+        this.serverUrl = CliConfigDefaults.resolveServerUrl(serverUrl);
+        this.adminToken = CliConfigDefaults.resolveAdminToken(adminToken);
         this.httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         this.objectMapper = new ObjectMapper().registerModule(new JavaTimeModule()).configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
@@ -200,34 +198,5 @@ public class ApiClient {
         } catch (Exception e) {
             throw new CliException("Failed to serialize request: " + e.getMessage());
         }
-    }
-
-    private static String resolveServerUrl(String explicitUrl) {
-        if (explicitUrl != null && !explicitUrl.isBlank()) {
-            return explicitUrl.trim();
-        }
-        String envUrl = System.getenv(CliConfigDefaults.ENV_SERVER_URL);
-        if (envUrl != null && !envUrl.isBlank()) {
-            return envUrl.trim();
-        }
-        return CliConfigDefaults.DEFAULT_SERVER_URL;
-    }
-
-    private static String resolveAdminToken(String explicitToken) {
-        if (explicitToken != null && !explicitToken.isBlank()) {
-            return explicitToken.trim();
-        }
-        String envToken = System.getenv(CliConfigDefaults.ENV_ADMIN_TOKEN);
-        if (envToken != null && !envToken.isBlank()) {
-            return envToken.trim();
-        }
-        Path tokenFile = CliConfigDefaults.resolveDefaultTokenFile();
-        if (tokenFile != null && Files.exists(tokenFile)) {
-            try {
-                return Files.readString(tokenFile, StandardCharsets.UTF_8).trim();
-            } catch (IOException ignored) {
-            }
-        }
-        return null;
     }
 }
