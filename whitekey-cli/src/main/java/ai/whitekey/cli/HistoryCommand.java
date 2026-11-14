@@ -15,19 +15,16 @@ public class HistoryCommand extends BaseCommand {
 
     public static final String DEFAULT_LIMIT = "20";
 
-    @Option(names = "--help", usageHelp = true, description = "Show this help message and exit.")
-    private boolean help;
-
-    @Option(names = {"-l", "--limit"}, defaultValue = DEFAULT_LIMIT, description = "Max number of actions (1-100)")
+    @Option(names = "--limit", defaultValue = DEFAULT_LIMIT, description = "Max number of actions (1-100)")
     private int limit;
 
-    @Option(names = {"-s", "--status"}, description = "Filter by status (ALLOWED, DENIED, etc.)")
+    @Option(names = "--status", description = "Filter by status (ALLOWED, DENIED, etc.)")
     private String status;
 
-    @Option(names = {"-m", "--method"}, description = "Filter by HTTP method")
+    @Option(names = "--method", description = "Filter by HTTP method")
     private String method;
 
-    @Option(names = {"-h", "--host"}, description = "Filter by host")
+    @Option(names = "--host", description = "Filter by host")
     private String host;
 
     @Override
@@ -50,7 +47,7 @@ public class HistoryCommand extends BaseCommand {
         }
     }
 
-    @Command(name = "clear", description = "Clear history of finished actions", mixinStandardHelpOptions = true)
+    @Command(name = "clear", description = "Clear history of finished actions")
     public static class ClearCommand extends BaseCommand {
 
         @Override
