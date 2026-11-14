@@ -204,6 +204,35 @@ public final class PolicyDecisionEngine {
         String rawPath = url.getRawPath();
         String path = (rawPath == null || rawPath.isEmpty()) ? "/" : rawPath;
 
+        Map<String, List<String>> queryParams = UriComponentsBuilder.fromUri(url).build().getQueryParams();
+        return matchesRequestMetadata(method, host, port, path, queryParams, requestHeaders, rule);
+    }
+
+    public boolean matchesHttp(HttpActionEntity action, HttpRuleEntity rule) {
+        if (action == null) {
+            return false;
+        }
+        if (!matchesRequestMetadata(
+                action.getMethod(),
+                action.getHost(),
+                action.getPort(),
+                action.getPath(),
+                action.getQueryParams(),
+                action.getHeaders(),
+                rule)) {
+            return false;
+        }
+        return matchesBody(rule, action.getBody());
+    }
+
+    private static boolean matchesRequestMetadata(
+            HttpMethod method,
+            String host,
+            Integer port,
+            String path,
+            Map<String, List<String>> queryParams,
+            HttpHeaders headers,
+            HttpRuleEntity rule) {
         if (rule.getMethods() != null && !rule.getMethods().isEmpty() && !rule.getMethods().contains(method)) {
             return false;
         }
@@ -217,40 +246,10 @@ public final class PolicyDecisionEngine {
                 && rule.getPaths().stream().noneMatch(pattern -> matchesPath(pattern, path))) {
             return false;
         }
-        Map<String, List<String>> queryParams = UriComponentsBuilder.fromUri(url).build().getQueryParams();
         if (!matchesQueryParams(rule.getQueryParams(), queryParams)) {
             return false;
         }
-        if (!matchesRuleHeaders(rule.getHeaders(), requestHeaders)) {
-            return false;
-        }
-        return true;
-    }
-
-    public boolean matchesHttp(HttpActionEntity action, HttpRuleEntity rule) {
-        if (action == null) {
-            return false;
-        }
-        if (rule.getMethods() != null && !rule.getMethods().isEmpty() && !rule.getMethods().contains(action.getMethod())) {
-            return false;
-        }
-        if (rule.getHosts() != null && !rule.getHosts().isEmpty() && !rule.getHosts().contains(action.getHost())) {
-            return false;
-        }
-        if (rule.getPorts() != null && !rule.getPorts().isEmpty() && !rule.getPorts().contains(action.getPort())) {
-            return false;
-        }
-        if (rule.getPaths() != null && !rule.getPaths().isEmpty()
-                && rule.getPaths().stream().noneMatch(pattern -> matchesPath(pattern, action.getPath()))) {
-            return false;
-        }
-        if (!matchesQueryParams(rule.getQueryParams(), action.getQueryParams())) {
-            return false;
-        }
-        if (!matchesRuleHeaders(rule.getHeaders(), action.getHeaders())) {
-            return false;
-        }
-        return matchesBody(rule, action.getBody());
+        return matchesRuleHeaders(rule.getHeaders(), headers);
     }
 
     private static boolean matchesQueryParams(Map<String, List<String>> expected, Map<String, List<String>> actual) {
