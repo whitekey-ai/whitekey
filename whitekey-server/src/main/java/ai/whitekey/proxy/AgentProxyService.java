@@ -182,8 +182,14 @@ public class AgentProxyService {
     public ProxyResponse authorizeTunnel(
             PreparedRequest prep,
             CompletableFuture<Void> clientDisconnected) {
-        UUID actionId = prep.evaluationResult().action().getId();
-        if (prep.evaluationResult().effect() == RuleEffect.REQUIRE_APPROVAL) {
+        return authorizeExecution(prep.evaluationResult(), clientDisconnected);
+    }
+
+    private ProxyResponse authorizeExecution(
+            EvaluationResult result,
+            CompletableFuture<Void> clientDisconnected) {
+        UUID actionId = result.action().getId();
+        if (result.effect() == RuleEffect.REQUIRE_APPROVAL) {
             ProxyResponse waitError = awaitApproval(actionId, clientDisconnected);
             if (waitError != null) {
                 return waitError;
@@ -247,19 +253,11 @@ public class AgentProxyService {
             return ProxyResponse.jsonError(HttpStatus.FORBIDDEN.value(), ERROR_POLICY_DENIED, decision.reason());
         }
 
+        ProxyResponse authError = authorizeExecution(decision, clientDisconnected);
+        if (authError != null) {
+            return authError;
+        }
         UUID actionId = decision.action().getId();
-        if (decision.effect() == RuleEffect.REQUIRE_APPROVAL) {
-            ProxyResponse waitError = awaitApproval(actionId, clientDisconnected);
-            if (waitError != null) {
-                return waitError;
-            }
-        }
-
-        if (clientDisconnected.isDone()) {
-            String reason = "Client closed connection before execution";
-            actionService.updateStatus(actionId, ActionStatus.CANCELLED);
-            return ProxyResponse.jsonError(HTTP_CLIENT_CLOSED_REQUEST, ERROR_CLIENT_DISCONNECTED, reason);
-        }
 
         try {
             HttpRequest.BodyPublisher publisher =
@@ -277,19 +275,11 @@ public class AgentProxyService {
             String proxyBaseUrl,
             InputStream bodyStream,
             CompletableFuture<Void> clientDisconnected) {
+        ProxyResponse authError = authorizeExecution(prep.evaluationResult(), clientDisconnected);
+        if (authError != null) {
+            return authError;
+        }
         UUID actionId = prep.evaluationResult().action().getId();
-        if (prep.evaluationResult().effect() == RuleEffect.REQUIRE_APPROVAL) {
-            ProxyResponse waitError = awaitApproval(actionId, clientDisconnected);
-            if (waitError != null) {
-                return waitError;
-            }
-        }
-
-        if (clientDisconnected.isDone()) {
-            String reason = "Client closed connection before execution";
-            actionService.updateStatus(actionId, ActionStatus.CANCELLED);
-            return ProxyResponse.jsonError(HTTP_CLIENT_CLOSED_REQUEST, ERROR_CLIENT_DISCONNECTED, reason);
-        }
 
         HttpRequest.BodyPublisher publisher =
                 bodyStream == null
