@@ -42,10 +42,7 @@ public final class PolicyDecisionEngine {
         }
     }
 
-    public record HeaderEvaluation(
-            boolean needsBody,
-            Decision decision,
-            List<HttpRuleEntity> candidateRules) {}
+    public record HeaderEvaluation(boolean needsBody, Decision decision) {}
 
     public HeaderEvaluation evaluateHeaders(
             HttpMethod method,
@@ -60,46 +57,32 @@ public final class PolicyDecisionEngine {
                         new Decision(
                                 RuleEffect.DENY,
                                 "Invalid applicable rule " + rule.getId() + ": " + RuleEffect.ERROR_EFFECT_REQUIRED,
-                                List.of()),
-                        List.of());
+                                List.of()));
             }
             if (matchesHeaders(method, url, headers, rule)) {
                 headerMatchedRules.add(rule);
             }
         }
 
-        if (headerMatchedRules.isEmpty()) {
+        List<MatchedRule> unconditionalDenies = headerMatchedRules.stream()
+                .filter(r -> r.getEffect() == RuleEffect.DENY && !hasBodyCondition(r))
+                .map(r -> new MatchedRule(r.getId(), r.getEffect()))
+                .toList();
+        if (!unconditionalDenies.isEmpty()) {
             return new HeaderEvaluation(
                     false,
-                    new Decision(RuleEffect.DENY, NO_MATCHING_RULE_REASON, List.of()),
-                    List.of());
+                    new Decision(RuleEffect.DENY, RULE_DENIED_REASON, unconditionalDenies));
         }
 
-        boolean hasUnconditionalDeny = headerMatchedRules.stream()
-                .anyMatch(r -> r.getEffect() == RuleEffect.DENY && (r.getBodyCondition() == null || r.getBodyCondition().isBlank()));
-        if (hasUnconditionalDeny) {
-            List<MatchedRule> matched = headerMatchedRules.stream()
-                    .filter(r -> r.getEffect() == RuleEffect.DENY && (r.getBodyCondition() == null || r.getBodyCondition().isBlank()))
-                    .map(r -> new MatchedRule(r.getId(), r.getEffect()))
-                    .toList();
-            return new HeaderEvaluation(
-                    false,
-                    new Decision(RuleEffect.DENY, RULE_DENIED_REASON, matched),
-                    List.of());
-        }
-
-        boolean anyHasBodyCondition = headerMatchedRules.stream()
-                .anyMatch(r -> r.getBodyCondition() != null && !r.getBodyCondition().isBlank());
-
-        if (anyHasBodyCondition) {
-            return new HeaderEvaluation(true, null, headerMatchedRules);
+        if (headerMatchedRules.stream().anyMatch(PolicyDecisionEngine::hasBodyCondition)) {
+            return new HeaderEvaluation(true, null);
         }
 
         List<MatchedRule> matched = headerMatchedRules.stream()
                 .map(r -> new MatchedRule(r.getId(), r.getEffect()))
                 .toList();
 
-        return new HeaderEvaluation(false, resolveDecision(matched), headerMatchedRules);
+        return new HeaderEvaluation(false, resolveDecision(matched));
     }
 
     public Decision evaluateHttp(HttpActionEntity action, List<HttpRuleEntity> rules) {
@@ -156,17 +139,15 @@ public final class PolicyDecisionEngine {
     }
 
     public boolean matchesBody(HttpRuleEntity rule, byte[] bodyBytes) {
-        if (rule.getBodyCondition() == null || rule.getBodyCondition().isBlank()) {
-            return true;
-        }
-        return bodyEvaluator.matches(rule.getBodyCondition(), bodyBytes);
+        return !hasBodyCondition(rule) || bodyEvaluator.matches(rule.getBodyCondition(), bodyBytes);
     }
 
     public boolean matchesBody(HttpRuleEntity rule, Path bodyFile) {
-        if (rule.getBodyCondition() == null || rule.getBodyCondition().isBlank()) {
-            return true;
-        }
-        return bodyEvaluator.matches(rule.getBodyCondition(), bodyFile);
+        return !hasBodyCondition(rule) || bodyEvaluator.matches(rule.getBodyCondition(), bodyFile);
+    }
+
+    private static boolean hasBodyCondition(HttpRuleEntity rule) {
+        return rule.getBodyCondition() != null && !rule.getBodyCondition().isBlank();
     }
 
     public boolean matchesHeaders(
