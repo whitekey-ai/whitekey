@@ -73,14 +73,14 @@ public class RuleCommand extends BaseCommand {
         @Option(names = {"-m", "--methods"}, split = ",", description = "Comma-separated HTTP methods (e.g. GET,POST)")
         private List<String> methods = List.of();
 
-        @Option(names = {"-h", "--hosts"}, split = ",", description = "Comma-separated hosts (e.g. api.github.com,*.slack.com)")
+        @Option(names = {"-h", "--hosts"}, required = true, split = ",", description = "Comma-separated exact DNS hosts (e.g. api.github.com,slack.com)")
         private List<String> hosts = List.of();
 
         @Option(names = {"-p", "--ports"}, split = ",", description = "Comma-separated ports (e.g. 80,443)")
         private List<Integer> ports = List.of();
 
-        @Option(names = {"--paths"}, split = ",", description = "Comma-separated paths (e.g. /v1/*)")
-        private List<String> paths = List.of();
+        @Option(names = {"--paths"}, defaultValue = "/*", split = ",", description = "Comma-separated path patterns (default: /*, e.g. /v1/*)")
+        private List<String> paths = List.of("/*");
 
         @Option(names = {"-c", "--condition"}, description = "CEL condition expression")
         private String condition;
