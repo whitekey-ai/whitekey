@@ -1,0 +1,17 @@
+services:
+  whitekey:
+    build: .
+    container_name: ${WHITEKEY_CONTAINER_NAME:-whitekey}
+    restart: unless-stopped
+    volumes:
+      - ${WHITEKEY_HOST_DATA_DIR:-~/.local/share/whitekey}:/root/.local/share/whitekey
+    networks:
+      - sandbox-internal
+      - proxy-uplink
+
+networks:
+  sandbox-internal:
+    name: ${WHITEKEY_SANDBOX_NETWORK:-whitekey-sandbox}
+    internal: true
+  proxy-uplink:
+    name: ${WHITEKEY_UPLINK_NETWORK:-whitekey-uplink}
