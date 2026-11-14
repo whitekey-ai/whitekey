@@ -3,7 +3,7 @@ package ai.whitekey.cli;
 import ai.whitekey.api.dto.Status;
 import picocli.CommandLine.Command;
 
-@Command(name = "status", description = "Show WhiteKey proxy and policy engine status", mixinStandardHelpOptions = true)
+@Command(name = "status", description = "Show WhiteKey proxy and policy engine status")
 public class StatusCommand extends BaseCommand {
 
     public static final String STATUS_RUNNING = "RUNNING";

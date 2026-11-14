@@ -9,7 +9,7 @@ import picocli.CommandLine.Parameters;
 import java.io.PrintWriter;
 import java.util.List;
 
-@Command(name = "approvals", description = "Manage pending action approvals", mixinStandardHelpOptions = true,
+@Command(name = "approvals", description = "Manage pending action approvals",
         subcommands = {
                 ApprovalCommand.ListCommand.class,
                 ApprovalCommand.WatchCommand.class,
@@ -28,12 +28,7 @@ public class ApprovalCommand extends BaseCommand {
         return "Action " + actionId + " " + label + "." + (saveRule ? " (Rule saved)" : "");
     }
 
-    @Override
-    public void run() {
-        System.out.println("Use 'approvals --help' to see available subcommands (list, watch, approve, reject).");
-    }
-
-    @Command(name = "watch", description = "Watch incoming actions one by one and approve/reject interactively", mixinStandardHelpOptions = true)
+    @Command(name = "watch", description = "Watch incoming actions one by one and approve/reject interactively")
     public static class WatchCommand extends BaseCommand {
 
         @Option(names = {"--interval"}, defaultValue = "300", description = "Poll interval in milliseconds (default: 300)")
@@ -46,7 +41,7 @@ public class ApprovalCommand extends BaseCommand {
         }
     }
 
-    @Command(name = "list", description = "List actions awaiting approval", mixinStandardHelpOptions = true)
+    @Command(name = "list", description = "List actions awaiting approval")
     public static class ListCommand extends BaseCommand {
 
         @Override
@@ -69,7 +64,7 @@ public class ApprovalCommand extends BaseCommand {
         }
     }
 
-    @Command(name = "approve", description = "Approve a pending action", mixinStandardHelpOptions = true)
+    @Command(name = "approve", description = "Approve a pending action")
     public static class ApproveCommand extends BaseCommand {
 
         @Parameters(index = "0", description = "Action ID (UUID)")
@@ -84,7 +79,7 @@ public class ApprovalCommand extends BaseCommand {
         }
     }
 
-    @Command(name = "reject", description = "Reject a pending action", mixinStandardHelpOptions = true)
+    @Command(name = "reject", description = "Reject a pending action")
     public static class RejectCommand extends BaseCommand {
 
         @Parameters(index = "0", description = "Action ID (UUID)")
