@@ -40,6 +40,7 @@ final class ProxyResponseWriter {
                     HttpVersion.HTTP_1_1,
                     HttpResponseStatus.valueOf(response.statusCode()));
             copyHeaders(response.headers(), nettyResponse);
+            HttpUtil.setTransferEncodingChunked(nettyResponse, true);
             HttpUtil.setKeepAlive(nettyResponse, keepAlive);
             ctx.writeAndFlush(nettyResponse);
 
