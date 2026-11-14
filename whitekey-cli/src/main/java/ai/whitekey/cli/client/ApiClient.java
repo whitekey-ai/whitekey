@@ -71,8 +71,7 @@ public class ApiClient {
     }
 
     public void deleteRule(String name) {
-        String encoded = URLEncoder.encode(name, StandardCharsets.UTF_8).replace("+", "%20");
-        delete(PATH_RULES + "/" + encoded);
+        delete(PATH_RULES + "/" + encodePathSegment(name));
     }
 
     public List<Credential> getCredentials() {
@@ -90,8 +89,11 @@ public class ApiClient {
     }
 
     public void deleteCredential(String name) {
-        String encoded = URLEncoder.encode(name, StandardCharsets.UTF_8).replace("+", "%20");
-        delete(PATH_CREDENTIALS + "/" + encoded);
+        delete(PATH_CREDENTIALS + "/" + encodePathSegment(name));
+    }
+
+    private static String encodePathSegment(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
     public List<Action> getPendingApprovals() {
