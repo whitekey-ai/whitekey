@@ -102,17 +102,7 @@ public final class PolicyDecisionEngine {
                 .map(r -> new MatchedRule(r.getId(), r.getEffect()))
                 .toList();
 
-        if (matched.stream().anyMatch(r -> r.effect() == RuleEffect.REQUIRE_APPROVAL)) {
-            return new HeaderEvaluation(
-                    false,
-                    new Decision(RuleEffect.REQUIRE_APPROVAL, RULE_REQUIRES_APPROVAL_REASON, matched),
-                    headerMatchedRules);
-        }
-
-        return new HeaderEvaluation(
-                false,
-                new Decision(RuleEffect.ALLOW, RULE_ALLOWED_REASON, matched),
-                headerMatchedRules);
+        return new HeaderEvaluation(false, resolveDecision(matched), headerMatchedRules);
     }
 
     public Decision evaluateHttp(HttpActionEntity action, List<HttpRuleEntity> rules) {
