@@ -26,15 +26,15 @@ public class SetupController {
         return new SetupStatusResponse(setup.isSetupMode());
     }
 
-    @PostMapping("/start")
+    @PostMapping("/on")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void start() {
-        setup.start();
+    public void turnOn() {
+        setup.turnOn();
     }
 
-    @PostMapping("/finish")
+    @PostMapping("/off")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void finish() {
-        setup.finish();
+    public void turnOff() {
+        setup.turnOff();
     }
 }
