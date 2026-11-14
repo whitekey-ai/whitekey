@@ -55,23 +55,9 @@ public class PolicyEvaluationService {
             return new HeaderEvaluationResult(true, null, headerEval.candidateRules());
         }
 
-        Decision decision = headerEval.decision();
-        boolean setup = setupService.isSetupMode() && decision.isUnmatchedAction();
-
-        if (!setup && decision.effect() != RuleEffect.REQUIRE_APPROVAL) {
-            ActionStatus status = decision.effect() == RuleEffect.ALLOW ? ActionStatus.ALLOWED : ActionStatus.DENIED;
-            HttpActionEntity action = actions.recordHttp(method, url, headers, null, status);
-            return new HeaderEvaluationResult(
-                    false,
-                    new EvaluationResult(decision.effect(), decision.reason(), action),
-                    headerEval.candidateRules());
-        }
-
-        String reason = setup ? SETUP_APPROVAL_REASON : decision.reason();
-        HttpActionEntity action = actions.recordHttp(method, url, headers, null, ActionStatus.AWAITING_APPROVAL);
         return new HeaderEvaluationResult(
                 false,
-                new EvaluationResult(RuleEffect.REQUIRE_APPROVAL, reason, action),
+                recordDecision(method, url, headers, null, headerEval.decision()),
                 headerEval.candidateRules());
     }
 
@@ -83,8 +69,17 @@ public class PolicyEvaluationService {
             Path bodyFile) {
         List<HttpRuleEntity> applicableRules = rules.getHttpRules();
         Decision decision = engine.evaluateWithBodyFile(method, url, headers, bodyFile, applicableRules);
-        boolean setup = setupService.isSetupMode() && decision.isUnmatchedAction();
         byte[] bodyBytes = readBodySilently(bodyFile);
+        return recordDecision(method, url, headers, bodyBytes, decision);
+    }
+
+    private EvaluationResult recordDecision(
+            HttpMethod method,
+            URI url,
+            HttpHeaders headers,
+            byte[] bodyBytes,
+            Decision decision) {
+        boolean setup = setupService.isSetupMode() && decision.isUnmatchedAction();
 
         if (!setup && decision.effect() != RuleEffect.REQUIRE_APPROVAL) {
             ActionStatus status = decision.effect() == RuleEffect.ALLOW ? ActionStatus.ALLOWED : ActionStatus.DENIED;
