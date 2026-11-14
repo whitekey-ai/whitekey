@@ -4,13 +4,12 @@ import ai.whitekey.api.dto.CreateHttpRuleRequest;
 import ai.whitekey.api.dto.HttpRule;
 import ai.whitekey.api.dto.ProtocolConstants;
 import ai.whitekey.api.dto.Rule;
-import ai.whitekey.cli.client.ApiClient;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.ParentCommand;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Command(name = "rules", description = "Manage policy rules", mixinStandardHelpOptions = true,
         subcommands = {
@@ -18,14 +17,7 @@ import java.util.List;
                 RuleCommand.AddCommand.class,
                 RuleCommand.RemoveCommand.class
         })
-public class RuleCommand implements Runnable {
-
-    @ParentCommand
-    private WhiteKeyRootCommand root;
-
-    public ApiClient getApiClient() {
-        return root.getApiClient();
-    }
+public class RuleCommand extends BaseCommand {
 
     @Override
     public void run() {
@@ -33,13 +25,11 @@ public class RuleCommand implements Runnable {
     }
 
     @Command(name = "list", description = "List all active policy rules", mixinStandardHelpOptions = true)
-    public static class ListCommand implements Runnable {
-        @ParentCommand
-        private RuleCommand parent;
+    public static class ListCommand extends BaseCommand {
 
         @Override
         public void run() {
-            List<Rule> rules = parent.getApiClient().getRules();
+            List<Rule> rules = getApiClient().getRules();
             if (rules == null || rules.isEmpty()) {
                 System.out.println("No policy rules configured.");
                 return;
@@ -62,14 +52,14 @@ public class RuleCommand implements Runnable {
         }
 
         private static String formatList(List<?> items) {
-            return (items == null || items.isEmpty()) ? "*" : items.stream().map(Object::toString).reduce((a, b) -> a + "," + b).orElse("*");
+            return (items == null || items.isEmpty())
+                    ? "*"
+                    : items.stream().map(Object::toString).collect(Collectors.joining(","));
         }
     }
 
     @Command(name = "add", description = "Add a new HTTP policy rule")
-    public static class AddCommand implements Runnable {
-        @ParentCommand
-        private RuleCommand parent;
+    public static class AddCommand extends BaseCommand {
 
         @Option(names = "--help", usageHelp = true, description = "Show this help message and exit.")
         private boolean help;
@@ -107,22 +97,20 @@ public class RuleCommand implements Runnable {
                     paths,
                     condition);
 
-            Rule created = parent.getApiClient().createRule(payload);
+            Rule created = getApiClient().createRule(payload);
             System.out.println("Rule created: " + created.name());
         }
     }
 
     @Command(name = "remove", description = "Remove a policy rule by name", mixinStandardHelpOptions = true)
-    public static class RemoveCommand implements Runnable {
-        @ParentCommand
-        private RuleCommand parent;
+    public static class RemoveCommand extends BaseCommand {
 
         @Parameters(index = "0", description = "Rule name")
         private String name;
 
         @Override
         public void run() {
-            parent.getApiClient().deleteRule(name);
+            getApiClient().deleteRule(name);
             System.out.println("Rule '" + name + "' deleted successfully.");
         }
     }
