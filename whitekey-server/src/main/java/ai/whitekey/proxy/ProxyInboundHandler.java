@@ -31,6 +31,7 @@ import org.springframework.http.HttpStatus;
 
 import org.springframework.util.unit.DataSize;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PipedInputStream;
@@ -200,9 +201,8 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
                                         ProxyResponse.jsonError(
                                                 HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_INTERNAL, MSG_INTERNAL_ERROR);
                             }
-                            ProxyResponse finalResp = response;
                             sendResponseFromVirtualThread(
-                                    ctx, currentMethod, finalResp, keepAlive);
+                                    ctx, currentMethod, response, keepAlive);
                         });
             } catch (IOException e) {
                 ProxyResponseWriter.write(
@@ -286,10 +286,7 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
                         return;
                     }
 
-                    if (closeListener != null) {
-                        ctx.channel().closeFuture().removeListener(closeListener);
-                        closeListener = null;
-                    }
+                    removeCloseListener(ctx);
 
                     ctx.channel().config().setAutoRead(false);
                     DefaultFullHttpResponse established =
@@ -348,13 +345,8 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
                 }
             }
             if (content instanceof LastHttpContent) {
-                try {
-                    if (spoolOut != null) {
-                        spoolOut.close();
-                        spoolOut = null;
-                    }
-                } catch (IOException ignored) {
-                }
+                closeQuietly(spoolOut);
+                spoolOut = null;
 
                 Path file = tempFile;
                 tempFile = null;
@@ -374,16 +366,10 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
                                         ProxyResponse.jsonError(
                                                 HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_INTERNAL, MSG_INTERNAL_ERROR);
                             } finally {
-                                if (file != null) {
-                                    try {
-                                        Files.deleteIfExists(file);
-                                    } catch (IOException ignored) {
-                                    }
-                                }
+                                deleteQuietly(file);
                             }
-                            ProxyResponse finalResp = response;
                             sendResponseFromVirtualThread(
-                                    ctx, currentMethod, finalResp, keepAlive);
+                                    ctx, currentMethod, response, keepAlive);
                         });
             }
         } else if (state == State.STREAMING) {
@@ -397,13 +383,8 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
                 }
             }
             if (content instanceof LastHttpContent) {
-                try {
-                    if (pipedOut != null) {
-                        pipedOut.close();
-                        pipedOut = null;
-                    }
-                } catch (IOException ignored) {
-                }
+                closeQuietly(pipedOut);
+                pipedOut = null;
             }
         }
     }
@@ -412,30 +393,37 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
         state = State.IDLE;
         currentMethod = null;
         preparedRequest = null;
-        if (pipedOut != null) {
-            try {
-                pipedOut.close();
-            } catch (IOException ignored) {
-            }
-            pipedOut = null;
-        }
-        if (spoolOut != null) {
-            try {
-                spoolOut.close();
-            } catch (IOException ignored) {
-            }
-            spoolOut = null;
-        }
-        if (tempFile != null) {
-            try {
-                Files.deleteIfExists(tempFile);
-            } catch (IOException ignored) {
-            }
-            tempFile = null;
-        }
-        if (clientDisconnected != null && closeListener != null) {
+        closeQuietly(pipedOut);
+        pipedOut = null;
+        closeQuietly(spoolOut);
+        spoolOut = null;
+        deleteQuietly(tempFile);
+        tempFile = null;
+        removeCloseListener(ctx);
+    }
+
+    private void removeCloseListener(ChannelHandlerContext ctx) {
+        if (closeListener != null) {
             ctx.channel().closeFuture().removeListener(closeListener);
             closeListener = null;
+        }
+    }
+
+    private static void closeQuietly(Closeable closeable) {
+        if (closeable != null) {
+            try {
+                closeable.close();
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    private static void deleteQuietly(Path file) {
+        if (file != null) {
+            try {
+                Files.deleteIfExists(file);
+            } catch (IOException ignored) {
+            }
         }
     }
 
