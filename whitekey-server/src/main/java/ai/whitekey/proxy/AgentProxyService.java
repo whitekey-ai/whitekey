@@ -20,7 +20,6 @@ import org.springframework.stereotype.Service;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import tools.jackson.databind.json.JsonMapper;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.ConnectException;
@@ -292,55 +291,36 @@ public class AgentProxyService {
 
     private ProxyResponse awaitApproval(
             UUID actionId, CompletableFuture<Void> clientDisconnected) {
-        String disconnectReason = "Client closed connection before approval";
-        while (true) {
-            if (clientDisconnected.isDone()) {
-                expire(actionId, ActionStatus.CANCELLED);
-                return ProxyResponse.jsonError(
-                        HTTP_CLIENT_CLOSED_REQUEST, ERROR_CLIENT_DISCONNECTED, disconnectReason);
-            }
-
-            CompletableFuture<Void> waiter = waitRegistry.register(actionId);
-            try {
+        CompletableFuture<Void> waiter = waitRegistry.register(actionId);
+        try {
+            while (true) {
                 if (clientDisconnected.isDone()) {
                     expire(actionId, ActionStatus.CANCELLED);
                     return ProxyResponse.jsonError(
-                            HTTP_CLIENT_CLOSED_REQUEST, ERROR_CLIENT_DISCONNECTED, disconnectReason);
+                            HTTP_CLIENT_CLOSED_REQUEST,
+                            ERROR_CLIENT_DISCONNECTED,
+                            "Client closed connection before approval");
                 }
 
-                // Re-check DB right after registering waiter to prevent any missed wakeup race
                 ActionEntity current = actionService.getAction(actionId);
                 if (current.getStatus() != ActionStatus.AWAITING_APPROVAL) {
                     return resolveOutcome(current);
                 }
 
-                // Wake up immediately on either human decision OR client TCP disconnect
                 try {
                     CompletableFuture.anyOf(waiter, clientDisconnected)
                             .get(APPROVAL_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
                 } catch (TimeoutException ignored) {
-                    // Loop around and check disconnect / DB
                 }
-
-                if (clientDisconnected.isDone()) {
-                    expire(actionId, ActionStatus.CANCELLED);
-                    return ProxyResponse.jsonError(
-                            HTTP_CLIENT_CLOSED_REQUEST, ERROR_CLIENT_DISCONNECTED, disconnectReason);
-                }
-
-                ActionEntity updated = actionService.getAction(actionId);
-                if (updated.getStatus() != ActionStatus.AWAITING_APPROVAL) {
-                    return resolveOutcome(updated);
-                }
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                expire(actionId, ActionStatus.CANCELLED);
-                return ProxyResponse.jsonError(HttpStatus.SERVICE_UNAVAILABLE.value(), ERROR_INTERRUPTED, "Request interrupted");
-            } catch (ExecutionException error) {
-                return ProxyResponse.jsonError(HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_APPROVAL_ERROR, "Failed waiting for approval");
-            } finally {
-                waitRegistry.unregister(actionId, waiter);
             }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            expire(actionId, ActionStatus.CANCELLED);
+            return ProxyResponse.jsonError(HttpStatus.SERVICE_UNAVAILABLE.value(), ERROR_INTERRUPTED, "Request interrupted");
+        } catch (ExecutionException error) {
+            return ProxyResponse.jsonError(HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_APPROVAL_ERROR, "Failed waiting for approval");
+        } finally {
+            waitRegistry.unregister(actionId, waiter);
         }
     }
 
