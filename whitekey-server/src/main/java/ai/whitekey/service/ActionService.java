@@ -34,19 +34,19 @@ public class ActionService {
     private final ActionRepository actionRepository;
     private final HttpActionRepository httpActionRepository;
     private final ApprovalWaitRegistry waitRegistry;
-    private final HttpApprovalHandler httpApprovalHandler;
+    private final List<ProtocolApprovalHandler<?>> protocolHandlers;
     private final int maxStoredBodyBytes;
 
     public ActionService(
             ActionRepository actionRepository,
             HttpActionRepository httpActionRepository,
             ApprovalWaitRegistry waitRegistry,
-            HttpApprovalHandler httpApprovalHandler,
+            List<ProtocolApprovalHandler<?>> protocolHandlers,
             @Value("${app.audit.max-body-bytes:" + DEFAULT_MAX_STORED_BODY_SIZE + "}") DataSize maxStoredBodySize) {
         this.actionRepository = actionRepository;
         this.httpActionRepository = httpActionRepository;
         this.waitRegistry = waitRegistry;
-        this.httpApprovalHandler = httpApprovalHandler;
+        this.protocolHandlers = protocolHandlers;
         this.maxStoredBodyBytes = (int) maxStoredBodySize.toBytes();
     }
 
@@ -140,16 +140,19 @@ public class ActionService {
             throw new ApprovalConflictException(
                     "This action is no longer awaiting approval. Refresh and try again.");
         }
-        HttpActionEntity httpAction = action instanceof HttpActionEntity http ? http : null;
-        if (nextStatus == ActionStatus.ALLOWED && httpAction != null) {
-            httpApprovalHandler.validateApproval(httpAction, saveRule);
+        ProtocolApprovalHandler<?> handler = protocolHandlers.stream()
+                .filter(h -> h.supports(action))
+                .findFirst()
+                .orElse(null);
+        if (nextStatus == ActionStatus.ALLOWED && handler != null) {
+            handler.validate(action, saveRule);
         }
         if (actionRepository.resolvePending(id, nextStatus) == 0) {
             throw new ApprovalConflictException(
                     "This action is no longer awaiting approval. Refresh and try again.");
         }
-        if (saveRule && httpAction != null) {
-            httpApprovalHandler.saveAllowRule(httpAction);
+        if (saveRule && handler != null) {
+            handler.saveRule(action);
         }
         action.setStatus(nextStatus);
         waitRegistry.notifyResolved(id);
