@@ -170,20 +170,16 @@ public final class PolicyDecisionEngine {
     }
 
     public boolean matchesHttp(HttpActionEntity action, HttpRuleEntity rule) {
-        if (action == null) {
-            return false;
-        }
-        if (!matchesRequestMetadata(
-                action.getMethod(),
-                action.getHost(),
-                action.getPort(),
-                action.getPath(),
-                action.getQueryParams(),
-                action.getHeaders(),
-                rule)) {
-            return false;
-        }
-        return matchesBody(rule, action.getBody());
+        return action != null
+                && matchesRequestMetadata(
+                        action.getMethod(),
+                        action.getHost(),
+                        action.getPort(),
+                        action.getPath(),
+                        action.getQueryParams(),
+                        action.getHeaders(),
+                        rule)
+                && matchesBody(rule, action.getBody());
     }
 
     private static boolean matchesRequestMetadata(
@@ -207,10 +203,8 @@ public final class PolicyDecisionEngine {
                 && rule.getPaths().stream().noneMatch(pattern -> matchesPath(pattern, path))) {
             return false;
         }
-        if (!matchesQueryParams(rule.getQueryParams(), queryParams)) {
-            return false;
-        }
-        return matchesRuleHeaders(rule.getHeaders(), headers);
+        return matchesQueryParams(rule.getQueryParams(), queryParams)
+                && matchesRuleHeaders(rule.getHeaders(), headers);
     }
 
     private static boolean matchesQueryParams(Map<String, List<String>> expected, Map<String, List<String>> actual) {
@@ -220,19 +214,8 @@ public final class PolicyDecisionEngine {
         if (actual == null) {
             return false;
         }
-        for (Map.Entry<String, List<String>> expectedParam : expected.entrySet()) {
-            List<String> actualValues = actual.get(expectedParam.getKey());
-            if (actualValues == null) {
-                return false;
-            }
-            List<String> expectedValues = expectedParam.getValue();
-            if (expectedValues != null
-                    && !expectedValues.isEmpty()
-                    && actualValues.stream().noneMatch(expectedValues::contains)) {
-                return false;
-            }
-        }
-        return true;
+        return expected.entrySet().stream()
+                .allMatch(e -> matchesValues(e.getValue(), actual.get(e.getKey())));
     }
 
     private static boolean matchesRuleHeaders(HttpHeaders expected, HttpHeaders actual) {
@@ -242,19 +225,15 @@ public final class PolicyDecisionEngine {
         if (actual == null) {
             return false;
         }
-        for (String expectedHeaderName : expected.headerNames()) {
-            List<String> actualValues = actual.get(expectedHeaderName);
-            if (actualValues == null) {
-                return false;
-            }
-            List<String> expectedValues = expected.get(expectedHeaderName);
-            if (expectedValues != null
-                    && !expectedValues.isEmpty()
-                    && actualValues.stream().noneMatch(expectedValues::contains)) {
-                return false;
-            }
-        }
-        return true;
+        return expected.headerNames().stream()
+                .allMatch(name -> matchesValues(expected.get(name), actual.get(name)));
+    }
+
+    private static boolean matchesValues(List<String> expectedValues, List<String> actualValues) {
+        return actualValues != null
+                && (expectedValues == null
+                        || expectedValues.isEmpty()
+                        || actualValues.stream().anyMatch(expectedValues::contains));
     }
 
     private static boolean matchesPath(String pattern, String path) {
