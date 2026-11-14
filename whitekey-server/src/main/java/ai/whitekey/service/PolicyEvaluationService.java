@@ -25,10 +25,7 @@ public class PolicyEvaluationService {
 
     public record EvaluationResult(RuleEffect effect, String reason, HttpActionEntity action) {}
 
-    public record HeaderEvaluationResult(
-            boolean needsBody,
-            EvaluationResult finalResult,
-            List<HttpRuleEntity> candidateRules) {}
+    public record HeaderEvaluationResult(boolean needsBody, EvaluationResult finalResult) {}
 
     private final RuleService rules;
     private final ActionService actions;
@@ -52,13 +49,12 @@ public class PolicyEvaluationService {
                 engine.evaluateHeaders(method, url, headers, applicableRules);
 
         if (headerEval.needsBody()) {
-            return new HeaderEvaluationResult(true, null, headerEval.candidateRules());
+            return new HeaderEvaluationResult(true, null);
         }
 
         return new HeaderEvaluationResult(
                 false,
-                recordDecision(method, url, headers, null, headerEval.decision()),
-                headerEval.candidateRules());
+                recordDecision(method, url, headers, null, headerEval.decision()));
     }
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
@@ -80,16 +76,15 @@ public class PolicyEvaluationService {
             byte[] bodyBytes,
             Decision decision) {
         boolean setup = setupService.isSetupMode() && decision.isUnmatchedAction();
-
-        if (!setup && decision.effect() != RuleEffect.REQUIRE_APPROVAL) {
-            ActionStatus status = decision.effect() == RuleEffect.ALLOW ? ActionStatus.ALLOWED : ActionStatus.DENIED;
-            HttpActionEntity action = actions.recordHttp(method, url, headers, bodyBytes, status);
-            return new EvaluationResult(decision.effect(), decision.reason(), action);
-        }
-
+        RuleEffect effect = setup ? RuleEffect.REQUIRE_APPROVAL : decision.effect();
         String reason = setup ? SETUP_APPROVAL_REASON : decision.reason();
-        HttpActionEntity action = actions.recordHttp(method, url, headers, bodyBytes, ActionStatus.AWAITING_APPROVAL);
-        return new EvaluationResult(RuleEffect.REQUIRE_APPROVAL, reason, action);
+        ActionStatus status = switch (effect) {
+            case ALLOW -> ActionStatus.ALLOWED;
+            case DENY -> ActionStatus.DENIED;
+            case REQUIRE_APPROVAL -> ActionStatus.AWAITING_APPROVAL;
+        };
+        HttpActionEntity action = actions.recordHttp(method, url, headers, bodyBytes, status);
+        return new EvaluationResult(effect, reason, action);
     }
 
     private static byte[] readBodySilently(Path bodyFile) {
