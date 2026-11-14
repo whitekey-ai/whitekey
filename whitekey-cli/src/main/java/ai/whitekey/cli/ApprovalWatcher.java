@@ -94,7 +94,7 @@ final class ApprovalWatcher {
             List<Action> pending = apiClient.getPendingApprovals();
             if (pending == null || pending.isEmpty()) {
                 if (!waitingMessageShown) {
-                    out.println("Waiting for incoming actions... (Press Ctrl+C to quit)");
+                    out.println("Waiting for incoming actions...");
                     out.flush();
                     waitingMessageShown = true;
                 }
@@ -104,58 +104,61 @@ final class ApprovalWatcher {
                 continue;
             }
 
-            waitingMessageShown = false;
+            if (waitingMessageShown) {
+                clearLines(1);
+                waitingMessageShown = false;
+            }
+
             Action current = pending.get(0);
-            printActionCard(current, pending.size());
+            int cardLines = printActionCard(current, pending.size());
 
             PromptResult result = prompt.select(current);
+            clearLines(cardLines);
+
             if (result.quit()) {
-                out.println("Stopped watching.");
-                out.flush();
                 return;
             }
             if (result.stale()) {
-                out.println("Action " + current.id() + " is no longer awaiting approval.");
-                out.flush();
                 continue;
             }
 
             Choice choice = result.choice();
             try {
                 apiClient.resolveApproval(current.id(), choice.decision, choice.saveRule);
-                out.println(ApprovalCommand.formatResolution(current.id(), choice.decision, choice.saveRule));
-                out.flush();
             } catch (CliException ex) {
-                // If the action expired or client disconnected right before resolve, move straight to the next one
-                if (isNoLongerPendingError(ex.getMessage())) {
-                    out.println("Skipped " + current.id() + ": " + ex.getMessage());
-                    out.flush();
-                } else {
+                if (!isNoLongerPendingError(ex.getMessage())) {
                     throw ex;
                 }
             }
         }
     }
 
-    private void printActionCard(Action action, int totalWaiting) {
-        out.println();
-        out.println("------------------------------------------------------------");
-        out.printf("Action 1 of %d pending (oldest first)  ID: %s%n", totalWaiting, action.id());
+    private int printActionCard(Action action, int totalWaiting) {
+        int lines = 1;
+        String queuePrefix = totalWaiting > 1 ? "[" + totalWaiting + " pending] " : "";
         if (action instanceof HttpAction ha) {
             String method = ha.method() != null ? ha.method() : "HTTP";
-            String target = formatHttpTarget(ha);
-            out.printf("Request: %s %s%n", method, target);
+            out.printf("%s%s %s%n", queuePrefix, method, formatHttpTarget(ha));
             if (ha.body() != null && !ha.body().isBlank()) {
                 String compactBody = ha.body().replaceAll("\\s+", " ").trim();
                 if (compactBody.length() > MAX_BODY_PREVIEW_CHARS) {
                     compactBody = compactBody.substring(0, MAX_BODY_PREVIEW_CHARS) + "...";
                 }
-                out.printf("Body:    %s%n", compactBody);
+                out.printf("Body: %s%n", compactBody);
+                lines++;
             }
         } else {
-            out.printf("Type:    %s%n", action.type());
+            out.printf("%s[%s] %s%n", queuePrefix, action.type(), action.id());
         }
         out.flush();
+        return lines;
+    }
+
+    private void clearLines(int count) {
+        if (count > 0) {
+            out.print("\u001B[" + count + "A\r\u001B[J");
+            out.flush();
+        }
     }
 
     private static String formatHttpTarget(HttpAction ha) {
@@ -205,14 +208,17 @@ final class ApprovalWatcher {
                     int ch = reader.read(pollIntervalMs);
                     if (ch == NonBlockingReader.READ_EXPIRED) {
                         if (!isStillPending(current.id())) {
+                            clearLines(OPTIONS.length);
                             return PromptResult.staleSignal();
                         }
                         continue;
                     }
                     if (ch == -1 || ch == 3 || ch == 'q' || ch == 'Q') {
+                        clearLines(OPTIONS.length);
                         return PromptResult.quitSignal();
                     }
                     if (ch == '\r' || ch == '\n') {
+                        clearLines(OPTIONS.length);
                         return PromptResult.selected(OPTIONS[selected]);
                     }
 
@@ -259,9 +265,8 @@ final class ApprovalWatcher {
         }
 
         private void renderMenu(int selected, boolean redraw) {
-            int totalLines = OPTIONS.length + 1;
             if (redraw) {
-                out.print("\u001B[" + totalLines + "A\r");
+                out.print("\u001B[" + OPTIONS.length + "A\r");
             }
             for (int i = 0; i < OPTIONS.length; i++) {
                 String prefix = (i == selected) ? "> " : "  ";
@@ -270,10 +275,6 @@ final class ApprovalWatcher {
                 }
                 out.printf("%s%d. %s%n", prefix, i + 1, OPTIONS[i].label);
             }
-            if (redraw) {
-                out.print("\u001B[2K");
-            }
-            out.println("(Use Up/Down or 1-3 to move pointer, Enter to confirm, q to quit)");
             out.flush();
         }
     }
@@ -290,24 +291,30 @@ final class ApprovalWatcher {
             for (int i = 0; i < OPTIONS.length; i++) {
                 out.printf("  %d. %s%n", i + 1, OPTIONS[i].label);
             }
+            int linesPrinted = OPTIONS.length;
             while (true) {
                 out.print("Select [1-" + OPTIONS.length + ", q to quit]: ");
                 out.flush();
                 String line = reader.readLine();
+                linesPrinted++;
                 if (line == null) {
+                    clearLines(linesPrinted);
                     return PromptResult.quitSignal();
                 }
                 String trimmed = line.trim();
                 if ("q".equalsIgnoreCase(trimmed)) {
+                    clearLines(linesPrinted);
                     return PromptResult.quitSignal();
                 }
                 if (trimmed.length() == 1) {
                     int idx = trimmed.charAt(0) - '1';
                     if (idx >= 0 && idx < OPTIONS.length) {
+                        clearLines(linesPrinted);
                         return PromptResult.selected(OPTIONS[idx]);
                     }
                 }
                 out.println("Invalid choice. Enter 1-" + OPTIONS.length + ", or q.");
+                linesPrinted++;
             }
         }
     }
