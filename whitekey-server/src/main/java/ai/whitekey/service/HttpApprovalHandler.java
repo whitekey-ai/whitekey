@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 @Component
-public class HttpApprovalHandler {
+public class HttpApprovalHandler implements ProtocolApprovalHandler<HttpActionEntity> {
 
     private final RuleService rules;
     private final SetupService setupService;
@@ -24,6 +24,12 @@ public class HttpApprovalHandler {
         this.engine = engine;
     }
 
+    @Override
+    public Class<HttpActionEntity> getActionType() {
+        return HttpActionEntity.class;
+    }
+
+    @Override
     public void validateApproval(HttpActionEntity http, boolean saveRule) {
         var current = engine.evaluateHttp(http, rules.getHttpRules());
         if (current.isUnmatchedAction() && !setupService.isSetupMode()) {
@@ -36,6 +42,7 @@ public class HttpApprovalHandler {
         }
     }
 
+    @Override
     public void saveAllowRule(HttpActionEntity http) {
         HttpMethod method = http.getMethod();
         String host = http.getHost();
