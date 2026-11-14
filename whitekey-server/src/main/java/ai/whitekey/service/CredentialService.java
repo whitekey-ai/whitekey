@@ -17,12 +17,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Locale;
-import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class CredentialService {
+
+    public static final String DEFAULT_MASKED_SECRET = "****";
+    public static final int MIN_UNMASKED_LENGTH = 8;
+    public static final int MAX_VISIBLE_SECRET_PART = 4;
+    public static final String MASK_ELLIPSIS = "...";
 
     private final CredentialRepository repository;
     private final HttpCredentialRepository httpCredentialRepository;
@@ -50,73 +53,53 @@ public class CredentialService {
     }
 
     private Credential createHttpCredential(CreateHttpCredentialRequest request) {
-        String name = request.name().trim();
-        String host = request.host();
-        HttpCredentialTargetType targetType = request.targetType() != null && !request.targetType().isBlank()
-                ? HttpCredentialTargetType.valueOf(request.targetType().trim().toUpperCase(Locale.ROOT))
+        CredentialPreset preset = (request.preset() != null && !request.preset().isBlank())
+                ? presetService.findPreset(request.preset())
+                        .orElseThrow(() -> new IllegalArgumentException("Unknown credential preset: " + request.preset()))
                 : null;
-        String targetKey = request.targetKey();
-        String formatTemplate = request.formatTemplate();
-        String rawSecret = request.secret().trim();
 
-        if (request.preset() != null && !request.preset().isBlank()) {
-            CredentialPreset preset = presetService.findPreset(request.preset())
-                    .orElseThrow(() -> new IllegalArgumentException("Unknown credential preset: " + request.preset()));
-            if (host == null || host.isBlank()) {
-                host = preset.defaultHost();
-            }
-            if (targetType == null && preset.targetType() != null && !preset.targetType().isBlank()) {
-                targetType = HttpCredentialTargetType.valueOf(preset.targetType().trim().toUpperCase(Locale.ROOT));
-            }
-            if (targetKey == null || targetKey.isBlank()) {
-                targetKey = preset.targetKey();
-            }
-            if (formatTemplate == null || formatTemplate.isBlank()) {
-                formatTemplate = preset.formatTemplate();
-            }
-        }
-
-        if (host == null || host.isBlank()) {
+        String host = firstNonBlank(request.host(), preset != null ? preset.defaultHost() : null, null);
+        if (host == null) {
             throw new IllegalArgumentException("Target host is required");
         }
-        if (targetType == null) {
-            targetType = HttpCredentialTargetType.HEADER;
-        }
-        if (targetKey == null || targetKey.isBlank()) {
-            targetKey = HttpHeaders.AUTHORIZATION;
-        }
-        if (formatTemplate == null || formatTemplate.isBlank()) {
-            formatTemplate = "%s";
-        }
-
+        String rawType = firstNonBlank(
+                request.targetType(),
+                preset != null ? preset.targetType() : null,
+                HttpCredentialTargetType.HEADER.name());
+        HttpCredentialTargetType targetType = HttpCredentialTargetType.valueOf(rawType.toUpperCase(Locale.ROOT));
+        String targetKey = firstNonBlank(request.targetKey(), preset != null ? preset.targetKey() : null, HttpHeaders.AUTHORIZATION);
+        String formatTemplate = firstNonBlank(request.formatTemplate(), preset != null ? preset.formatTemplate() : null, "%s");
+        String rawSecret = request.secret().trim();
         String encrypted = encryptionService.encrypt(rawSecret);
+        String name = request.name().trim();
 
-        Optional<CredentialEntity> existing = repository.findByName(name);
-        HttpCredentialEntity entity;
-        if (existing.isPresent()) {
-            if (existing.get() instanceof HttpCredentialEntity httpEntity) {
-                entity = httpEntity;
-                entity.setHost(host.trim().toLowerCase(Locale.ROOT));
-                entity.setTargetType(targetType);
-                entity.setTargetKey(targetKey.trim());
-                entity.setFormatTemplate(formatTemplate.trim());
-                entity.setEncryptedSecret(encrypted);
-            } else {
-                throw new IllegalStateException("Existing credential " + name + " is not an HTTP credential");
-            }
-        } else {
-            entity = new HttpCredentialEntity(
-                    name,
-                    host.trim().toLowerCase(Locale.ROOT),
-                    targetType,
-                    targetKey.trim(),
-                    formatTemplate.trim(),
-                    encrypted);
-        }
+        HttpCredentialEntity entity = repository.findByName(name)
+                .map(existing -> {
+                    if (existing instanceof HttpCredentialEntity httpEntity) {
+                        httpEntity.setHost(host);
+                        httpEntity.setTargetType(targetType);
+                        httpEntity.setTargetKey(targetKey);
+                        httpEntity.setFormatTemplate(formatTemplate);
+                        httpEntity.setEncryptedSecret(encrypted);
+                        return httpEntity;
+                    }
+                    throw new IllegalStateException("Existing credential " + name + " is not an HTTP credential");
+                })
+                .orElseGet(() -> new HttpCredentialEntity(name, host, targetType, targetKey, formatTemplate, encrypted));
 
         HttpCredentialEntity saved = httpCredentialRepository.save(entity);
         invalidateCache();
         return toDto(saved, rawSecret);
+    }
+
+    private static String firstNonBlank(String primary, String fallback, String defaultValue) {
+        if (primary != null && !primary.isBlank()) {
+            return primary.trim();
+        }
+        if (fallback != null && !fallback.isBlank()) {
+            return fallback.trim();
+        }
+        return defaultValue;
     }
 
     public void invalidateCache() {
@@ -128,8 +111,7 @@ public class CredentialService {
         List<HttpCredentialEntity> creds = credentialCache.get();
         if (creds == null) {
             creds = List.copyOf(httpCredentialRepository.findAll());
-            credentialCache.compareAndSet(null, creds);
-            creds = credentialCache.get();
+            credentialCache.set(creds);
         }
         return creds;
     }
@@ -140,11 +122,6 @@ public class CredentialService {
                 .map(this::toDto)
                 .toList();
     }
-
-    public static final String DEFAULT_MASKED_SECRET = "****";
-    public static final int MIN_UNMASKED_LENGTH = 8;
-    public static final int MAX_VISIBLE_SECRET_PART = 4;
-    public static final String MASK_ELLIPSIS = "...";
 
     @Transactional(readOnly = true)
     public Credential getByName(String name) {
@@ -185,14 +162,10 @@ public class CredentialService {
     }
 
     public static String maskSecret(String rawSecret) {
-        if (rawSecret == null || rawSecret.isBlank()) {
+        if (rawSecret == null || rawSecret.isBlank() || rawSecret.length() <= MIN_UNMASKED_LENGTH) {
             return DEFAULT_MASKED_SECRET;
         }
-        if (rawSecret.length() <= MIN_UNMASKED_LENGTH) {
-            return DEFAULT_MASKED_SECRET;
-        }
-        int visiblePrefix = Math.min(MAX_VISIBLE_SECRET_PART, rawSecret.length() / 4);
-        int visibleSuffix = Math.min(MAX_VISIBLE_SECRET_PART, rawSecret.length() / 4);
-        return rawSecret.substring(0, visiblePrefix) + MASK_ELLIPSIS + rawSecret.substring(rawSecret.length() - visibleSuffix);
+        int visible = Math.min(MAX_VISIBLE_SECRET_PART, rawSecret.length() / 4);
+        return rawSecret.substring(0, visible) + MASK_ELLIPSIS + rawSecret.substring(rawSecret.length() - visible);
     }
 }
