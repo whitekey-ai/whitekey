@@ -1,6 +1,9 @@
 package ai.whitekey.service;
 
+import ai.whitekey.api.dto.CreateHttpRuleRequest;
+import ai.whitekey.api.dto.CreateRuleRequest;
 import ai.whitekey.api.dto.ProtocolConstants;
+import ai.whitekey.api.dto.UpdateHttpRuleRequest;
 import ai.whitekey.entity.HttpRuleEntity;
 import ai.whitekey.entity.RuleEffect;
 import ai.whitekey.entity.RuleEntity;
@@ -43,21 +46,24 @@ public class RuleService {
     }
 
     @Transactional
-    public HttpRuleEntity createHttpRule(
-            String name,
-            RuleEffect effect,
-            List<HttpMethod> methods,
-            List<String> hosts,
-            List<Integer> ports,
-            List<String> paths,
-            Map<String, List<String>> queryParams,
-            HttpHeaders headers,
-            String bodyCondition) {
-        String validName = normalizeAndValidateName(name);
-        if (repository.existsByName(validName)) {
-            throw new ConflictException("Rule already exists: " + validName);
+    public RuleEntity createRule(CreateRuleRequest request) {
+        if (request instanceof CreateHttpRuleRequest httpReq) {
+            String validName = normalizeAndValidateName(httpReq.name());
+            if (repository.existsByName(validName)) {
+                throw new ConflictException("Rule already exists: " + validName);
+            }
+            return saveNewHttpRule(
+                    validName,
+                    RuleEffect.fromString(httpReq.effect()),
+                    validator.methodNames(httpReq.methods()),
+                    httpReq.hosts(),
+                    httpReq.ports(),
+                    httpReq.paths(),
+                    httpReq.queryParams(),
+                    validator.headers(httpReq.headers()),
+                    httpReq.bodyCondition());
         }
-        return saveNewHttpRule(validName, effect, methods, hosts, ports, paths, queryParams, headers, bodyCondition);
+        throw new IllegalArgumentException("Unsupported rule request type: " + request.getClass().getName());
     }
 
     @Transactional
@@ -87,23 +93,17 @@ public class RuleService {
         if (effect == null) {
             throw new IllegalArgumentException(RuleEffect.ERROR_EFFECT_REQUIRED);
         }
-        List<String> validHosts = validator.hosts(hosts);
-        List<String> validPaths = validator.pathPatterns(paths);
-        List<Integer> validPorts = validator.ports(ports);
-        List<HttpMethod> validMethods = validator.methods(methods);
-        Map<String, List<String>> validQueryParams = validator.queryParams(queryParams);
-        String validBodyCondition = validator.bodyCondition(bodyCondition);
         HttpRuleEntity rule =
                 new HttpRuleEntity(
                         validName,
                         effect,
-                        validMethods,
-                        validHosts,
-                        validPorts,
-                        validPaths,
-                        validQueryParams,
+                        validator.methods(methods),
+                        validator.hosts(hosts),
+                        validator.ports(ports),
+                        validator.pathPatterns(paths),
+                        validator.queryParams(queryParams),
                         headers != null ? headers : HttpHeaders.EMPTY,
-                        validBodyCondition);
+                        validator.bodyCondition(bodyCondition));
         HttpRuleEntity saved = httpRuleRepository.save(rule);
         invalidateCache();
         return saved;
@@ -148,57 +148,47 @@ public class RuleService {
     }
 
     @Transactional
-    public HttpRuleEntity updateHttpRule(
-            String currentName,
-            String newName,
-            RuleEffect effect,
-            List<HttpMethod> methods,
-            List<String> hosts,
-            List<Integer> ports,
-            List<String> paths,
-            Map<String, List<String>> queryParams,
-            HttpHeaders headers,
-            String bodyCondition) {
+    public HttpRuleEntity updateHttpRule(String currentName, UpdateHttpRuleRequest request) {
         RuleEntity rule = getRule(currentName);
-        if (rule instanceof HttpRuleEntity httpRule) {
-            if (newName != null) {
-                String validNewName = normalizeAndValidateName(newName);
-                if (!validNewName.equals(httpRule.getName())) {
-                    if (repository.existsByName(validNewName)) {
-                        throw new ConflictException("Rule already exists: " + validNewName);
-                    }
-                    httpRule.setName(validNewName);
-                }
-            }
-            if (effect != null) {
-                httpRule.setEffect(effect);
-            }
-            if (methods != null) {
-                httpRule.setMethods(validator.methods(methods));
-            }
-            if (hosts != null) {
-                httpRule.setHosts(validator.hosts(hosts));
-            }
-            if (ports != null) {
-                httpRule.setPorts(validator.ports(ports));
-            }
-            if (paths != null) {
-                httpRule.setPaths(validator.pathPatterns(paths));
-            }
-            if (queryParams != null) {
-                httpRule.setQueryParams(validator.queryParams(queryParams));
-            }
-            if (headers != null) {
-                httpRule.setHeaders(headers);
-            }
-            if (bodyCondition != null) {
-                httpRule.setBodyCondition(validator.bodyCondition(bodyCondition));
-            }
-            HttpRuleEntity saved = httpRuleRepository.save(httpRule);
-            invalidateCache();
-            return saved;
+        if (!(rule instanceof HttpRuleEntity httpRule)) {
+            throw new IllegalStateException("Unsupported rule type: " + rule.getClass().getName());
         }
-        throw new IllegalStateException("Unsupported rule type: " + rule.getClass().getName());
+        if (request.name() != null) {
+            String validNewName = normalizeAndValidateName(request.name());
+            if (!validNewName.equals(httpRule.getName())) {
+                if (repository.existsByName(validNewName)) {
+                    throw new ConflictException("Rule already exists: " + validNewName);
+                }
+                httpRule.setName(validNewName);
+            }
+        }
+        if (request.effect() != null) {
+            httpRule.setEffect(RuleEffect.fromString(request.effect()));
+        }
+        if (request.methods() != null) {
+            httpRule.setMethods(validator.methodNames(request.methods()));
+        }
+        if (request.hosts() != null) {
+            httpRule.setHosts(validator.hosts(request.hosts()));
+        }
+        if (request.ports() != null) {
+            httpRule.setPorts(validator.ports(request.ports()));
+        }
+        if (request.paths() != null) {
+            httpRule.setPaths(validator.pathPatterns(request.paths()));
+        }
+        if (request.queryParams() != null) {
+            httpRule.setQueryParams(validator.queryParams(request.queryParams()));
+        }
+        if (request.headers() != null) {
+            httpRule.setHeaders(validator.headers(request.headers()));
+        }
+        if (request.bodyCondition() != null) {
+            httpRule.setBodyCondition(validator.bodyCondition(request.bodyCondition()));
+        }
+        HttpRuleEntity saved = httpRuleRepository.save(httpRule);
+        invalidateCache();
+        return saved;
     }
 
     @Transactional
