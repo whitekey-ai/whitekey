@@ -62,15 +62,13 @@ public class AdminTokenService {
                 return;
             }
 
-            byte[] randomBytes = new byte[TOKEN_RANDOM_BYTES];
-            new SecureRandom().nextBytes(randomBytes);
-            String token = tokenPrefix + HexFormat.of().formatHex(randomBytes);
+            this.adminToken = generateToken();
 
             if (tokenPath.getParent() != null) {
                 Files.createDirectories(tokenPath.getParent());
             }
 
-            Files.writeString(tokenPath, token, StandardCharsets.UTF_8);
+            Files.writeString(tokenPath, this.adminToken, StandardCharsets.UTF_8);
 
             if (FileSystems.getDefault().supportedFileAttributeViews().contains(POSIX_VIEW)) {
                 Set<PosixFilePermission> permissions = PosixFilePermissions.fromString(OWNER_READ_WRITE_PERMISSIONS);
@@ -80,18 +78,23 @@ public class AdminTokenService {
                 }
             }
 
-            this.adminToken = token;
             log.info("Generated new WhiteKey Admin Token and saved to: {}", tokenPath);
             log.info("================================================================================");
             log.info("WhiteKey Admin Token: {}", this.adminToken);
             log.info("================================================================================");
         } catch (IOException error) {
             log.error("Failed to load or save WhiteKey Admin Token file at {}", tokenPath, error);
-            byte[] randomBytes = new byte[TOKEN_RANDOM_BYTES];
-            new SecureRandom().nextBytes(randomBytes);
-            this.adminToken = tokenPrefix + HexFormat.of().formatHex(randomBytes);
+            if (this.adminToken == null) {
+                this.adminToken = generateToken();
+            }
             log.warn("Using temporary in-memory WhiteKey Admin Token: {}", this.adminToken);
         }
+    }
+
+    private String generateToken() {
+        byte[] randomBytes = new byte[TOKEN_RANDOM_BYTES];
+        new SecureRandom().nextBytes(randomBytes);
+        return tokenPrefix + HexFormat.of().formatHex(randomBytes);
     }
 
     public boolean isValidToken(String candidate) {
