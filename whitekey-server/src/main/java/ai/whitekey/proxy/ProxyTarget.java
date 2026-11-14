@@ -18,10 +18,10 @@ public record ProxyTarget(
     public static final int MIN_PORT = 1;
     public static final int MAX_PORT = 65535;
 
-    private static final String SCHEME_HTTPS_PREFIX = "https://";
-    private static final String SCHEME_HTTP_PREFIX = "http://";
-    private static final String SCHEME_HTTPS_SINGLE_SLASH = "https:/";
-    private static final String SCHEME_HTTP_SINGLE_SLASH = "http:/";
+    private static final String SCHEME_HTTPS_PREFIX = ProtocolConstants.HTTPS + "://";
+    private static final String SCHEME_HTTP_PREFIX = ProtocolConstants.HTTP + "://";
+    private static final String SCHEME_HTTPS_SINGLE_SLASH = ProtocolConstants.HTTPS + ":/";
+    private static final String SCHEME_HTTP_SINGLE_SLASH = ProtocolConstants.HTTP + ":/";
 
     public static ProxyTarget parse(String rawPath, String rawQuery) {
         if (rawPath == null || rawPath.isEmpty() || "/".equals(rawPath)) {
@@ -129,7 +129,7 @@ public record ProxyTarget(
                         ? proxyBaseUrl.substring(0, proxyBaseUrl.length() - 1)
                         : proxyBaseUrl;
         String lower = location.toLowerCase(Locale.ROOT);
-        if (lower.startsWith("https://") || lower.startsWith("http://")) {
+        if (lower.startsWith(SCHEME_HTTPS_PREFIX) || lower.startsWith(SCHEME_HTTP_PREFIX)) {
             return base + "/" + location;
         }
         if (location.startsWith("/")) {
