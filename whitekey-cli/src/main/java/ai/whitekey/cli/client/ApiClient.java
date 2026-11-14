@@ -38,10 +38,13 @@ public class ApiClient {
     public static final int MAX_ACTIONS_LIMIT = 100;
 
     public static final String PATH_STATUS = "/status";
+    public static final String PATH_SETUP = "/setup";
     public static final String PATH_RULES = "/rules";
     public static final String PATH_CREDENTIALS = "/credentials";
     public static final String PATH_CREDENTIAL_PRESETS = "/credentials/presets";
     public static final String PATH_ACTIONS = "/actions";
+
+    public record SetupStatus(boolean setupMode) {}
 
     private final String serverUrl;
     private final String adminToken;
@@ -57,6 +60,19 @@ public class ApiClient {
 
     public Status getStatus() {
         return get(PATH_STATUS, Status.class);
+    }
+
+    public boolean getSetupStatus() {
+        SetupStatus status = get(PATH_SETUP, SetupStatus.class);
+        return status != null && status.setupMode();
+    }
+
+    public void turnSetupOn() {
+        post(PATH_SETUP + "/on", null, Void.class);
+    }
+
+    public void turnSetupOff() {
+        post(PATH_SETUP + "/off", null, Void.class);
     }
 
     public List<Rule> getRules() {

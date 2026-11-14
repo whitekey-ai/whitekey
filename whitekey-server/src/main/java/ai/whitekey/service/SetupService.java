@@ -44,12 +44,12 @@ public class SetupService {
     }
 
     @Transactional
-    public void start() {
+    public void turnOn() {
         setSetupMode(true);
     }
 
     @Transactional
-    public void finish() {
+    public void turnOff() {
         setSetupMode(false);
 
         var currentRules = rules.getHttpRules();
