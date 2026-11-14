@@ -73,11 +73,8 @@ public class CelBodyEvaluator {
     }
 
     public boolean matches(String expression, Path filePath) {
-        if (filePath == null || !Files.exists(filePath)) {
-            return matches(expression, (InputStream) null);
-        }
         try {
-            if (Files.size(filePath) == 0) {
+            if (filePath == null || !Files.exists(filePath) || Files.size(filePath) == 0) {
                 return matches(expression, (InputStream) null);
             }
             try (InputStream in = Files.newInputStream(filePath)) {
@@ -99,8 +96,8 @@ public class CelBodyEvaluator {
             return false;
         }
 
+        Set<String> vars = compiled.variables();
         Map<String, Object> activation = new HashMap<>();
-        Set<String> remainingVars = new HashSet<>(compiled.variables());
 
         if (inputStream != null) {
             try (JsonParser parser = JSON.createParser(inputStream)) {
@@ -109,11 +106,10 @@ public class CelBodyEvaluator {
                     while (parser.nextToken() != JsonToken.END_OBJECT && parser.currentToken() != null) {
                         String propName = parser.currentName();
                         parser.nextToken(); // Move to property value
-                        if (remainingVars.contains(propName)) {
+                        if (vars.contains(propName) && !activation.containsKey(propName)) {
                             Object val = JSON.readValue(parser, Object.class);
                             activation.put(propName, val != null ? val : NullValue.NULL_VALUE);
-                            remainingVars.remove(propName);
-                            if (remainingVars.isEmpty()) {
+                            if (activation.size() == vars.size()) {
                                 break;
                             }
                         } else {
@@ -122,13 +118,12 @@ public class CelBodyEvaluator {
                     }
                 } else if (token == JsonToken.START_ARRAY) {
                     Object arrayVal = JSON.readValue(parser, Object.class);
-                    if (remainingVars.contains(VAR_BODY)) {
-                        activation.put(VAR_BODY, arrayVal != null ? arrayVal : NullValue.NULL_VALUE);
-                        remainingVars.remove(VAR_BODY);
+                    Object celVal = arrayVal != null ? arrayVal : NullValue.NULL_VALUE;
+                    if (vars.contains(VAR_BODY)) {
+                        activation.put(VAR_BODY, celVal);
                     }
-                    if (remainingVars.contains(VAR_DATA)) {
-                        activation.put(VAR_DATA, arrayVal != null ? arrayVal : NullValue.NULL_VALUE);
-                        remainingVars.remove(VAR_DATA);
+                    if (vars.contains(VAR_DATA)) {
+                        activation.put(VAR_DATA, celVal);
                     }
                 }
             } catch (Exception e) {
@@ -136,8 +131,8 @@ public class CelBodyEvaluator {
             }
         }
 
-        for (String var : remainingVars) {
-            activation.put(var, NullValue.NULL_VALUE);
+        for (String var : vars) {
+            activation.putIfAbsent(var, NullValue.NULL_VALUE);
         }
 
         try {
