@@ -93,6 +93,7 @@ public class RuleService {
         List<String> validPaths = validator.pathPatterns(paths);
         List<Integer> validPorts = validator.ports(ports);
         List<HttpMethod> validMethods = validator.methods(methods);
+        Map<String, List<String>> validQueryParams = validator.queryParams(queryParams);
         String validBodyCondition = validator.bodyCondition(bodyCondition);
         HttpRuleEntity rule =
                 new HttpRuleEntity(
@@ -102,7 +103,7 @@ public class RuleService {
                         validHosts,
                         validPorts,
                         validPaths,
-                        queryParams != null ? queryParams : Map.of(),
+                        validQueryParams,
                         headers != null ? headers : HttpHeaders.EMPTY,
                         validBodyCondition);
         HttpRuleEntity saved = httpRuleRepository.save(rule);
