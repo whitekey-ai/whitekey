@@ -123,11 +123,7 @@ final class ApprovalWatcher {
             Choice choice = result.choice();
             try {
                 apiClient.resolveApproval(current.id(), choice.decision, choice.saveRule);
-                String label = ApprovalCommand.DECISION_ALLOW.equals(choice.decision)
-                        ? ApprovalCommand.LABEL_APPROVED
-                        : ApprovalCommand.LABEL_REJECTED;
-                out.println("Action " + current.id() + " " + label + "."
-                        + (choice.saveRule ? " (Rule saved)" : ""));
+                out.println(ApprovalCommand.formatResolution(current.id(), choice.decision, choice.saveRule));
                 out.flush();
             } catch (CliException ex) {
                 // If the action expired or client disconnected right before resolve, move straight to the next one
