@@ -108,12 +108,9 @@ public class ApprovalCommand implements Runnable {
         @Parameters(index = "0", description = "Action ID (UUID)")
         private String actionId;
 
-        @Option(names = {"--save-rule"}, description = "Automatically save a permanent rule for this action")
-        private boolean saveRule;
-
         @Override
         public void run() {
-            parent.resolve(actionId, DECISION_BLOCK, saveRule);
+            parent.resolve(actionId, DECISION_BLOCK, false);
         }
     }
 }
