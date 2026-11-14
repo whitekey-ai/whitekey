@@ -2,10 +2,8 @@ package ai.whitekey.cli;
 
 import ai.whitekey.api.dto.Action;
 import ai.whitekey.api.dto.HttpAction;
-import ai.whitekey.cli.client.ApiClient;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.ParentCommand;
 
 import java.util.List;
 
@@ -13,12 +11,9 @@ import java.util.List;
         subcommands = {
                 HistoryCommand.ClearCommand.class
         })
-public class HistoryCommand implements Runnable {
+public class HistoryCommand extends BaseCommand {
 
     public static final String DEFAULT_LIMIT = "20";
-
-    @ParentCommand
-    private WhiteKeyRootCommand root;
 
     @Option(names = "--help", usageHelp = true, description = "Show this help message and exit.")
     private boolean help;
@@ -34,10 +29,6 @@ public class HistoryCommand implements Runnable {
 
     @Option(names = {"-h", "--host"}, description = "Filter by host")
     private String host;
-
-    public ApiClient getApiClient() {
-        return root.getApiClient();
-    }
 
     @Override
     public void run() {
@@ -60,13 +51,11 @@ public class HistoryCommand implements Runnable {
     }
 
     @Command(name = "clear", description = "Clear history of finished actions", mixinStandardHelpOptions = true)
-    public static class ClearCommand implements Runnable {
-        @ParentCommand
-        private HistoryCommand parent;
+    public static class ClearCommand extends BaseCommand {
 
         @Override
         public void run() {
-            parent.getApiClient().clearHistory();
+            getApiClient().clearHistory();
             System.out.println("Finished action history cleared.");
         }
     }
