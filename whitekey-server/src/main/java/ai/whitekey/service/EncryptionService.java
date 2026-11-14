@@ -23,6 +23,7 @@ import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 @Service
 public class EncryptionService {
@@ -35,7 +36,7 @@ public class EncryptionService {
     public static final int KEY_BYTE_LENGTH = 32;
     public static final String DIGEST_ALGORITHM = "SHA-256";
     public static final String DEFAULT_KEY_FILE_NAME = "whitekey_master.key";
-    private static final java.util.regex.Pattern HEX_64_PATTERN = java.util.regex.Pattern.compile("^[0-9a-fA-F]{64}$");
+    private static final Pattern HEX_64_PATTERN = Pattern.compile("^[0-9a-fA-F]{64}$");
 
     private final String configuredKey;
     private final String dataDir;
@@ -69,9 +70,8 @@ public class EncryptionService {
                 return;
             }
 
-            byte[] keyBytes = new byte[KEY_BYTE_LENGTH];
-            secureRandom.nextBytes(keyBytes);
-            String hex = HexFormat.of().formatHex(keyBytes);
+            this.secretKey = generateSecretKey();
+            String hex = HexFormat.of().formatHex(this.secretKey.getEncoded());
 
             if (keyPath.getParent() != null) {
                 Files.createDirectories(keyPath.getParent());
@@ -87,16 +87,20 @@ public class EncryptionService {
                 }
             }
 
-            this.secretKey = new SecretKeySpec(keyBytes, ALGORITHM);
             log.info("Generated new encryption master key and saved to: {}", keyPath);
         } catch (IOException error) {
             log.error("Failed to load or save encryption master key at {}", keyPath, error);
-            // In-memory fallback
-            byte[] fallbackBytes = new byte[KEY_BYTE_LENGTH];
-            secureRandom.nextBytes(fallbackBytes);
-            this.secretKey = new SecretKeySpec(fallbackBytes, ALGORITHM);
+            if (this.secretKey == null) {
+                this.secretKey = generateSecretKey();
+            }
             log.warn("Using temporary in-memory encryption key. Credentials will not persist across restarts!");
         }
+    }
+
+    private SecretKey generateSecretKey() {
+        byte[] keyBytes = new byte[KEY_BYTE_LENGTH];
+        secureRandom.nextBytes(keyBytes);
+        return new SecretKeySpec(keyBytes, ALGORITHM);
     }
 
     public String encrypt(String plaintext) {
@@ -132,17 +136,14 @@ public class EncryptionService {
                 throw new IllegalArgumentException("Corrupted encrypted data");
             }
 
-            byte[] iv = new byte[GCM_IV_LENGTH_BYTES];
-            System.arraycopy(combined, 0, iv, 0, GCM_IV_LENGTH_BYTES);
-
-            int ciphertextLen = combined.length - GCM_IV_LENGTH_BYTES;
-            byte[] ciphertext = new byte[ciphertextLen];
-            System.arraycopy(combined, GCM_IV_LENGTH_BYTES, ciphertext, 0, ciphertextLen);
-
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
-            cipher.init(Cipher.DECRYPT_MODE, secretKey, new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv));
+            cipher.init(
+                    Cipher.DECRYPT_MODE,
+                    secretKey,
+                    new GCMParameterSpec(GCM_TAG_LENGTH_BITS, combined, 0, GCM_IV_LENGTH_BYTES));
 
-            byte[] decrypted = cipher.doFinal(ciphertext);
+            byte[] decrypted =
+                    cipher.doFinal(combined, GCM_IV_LENGTH_BYTES, combined.length - GCM_IV_LENGTH_BYTES);
             return new String(decrypted, StandardCharsets.UTF_8);
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("Failed to decrypt secret (master key mismatch?)", e);
