@@ -30,7 +30,6 @@ import java.util.UUID;
 public class ActionService {
 
     public static final String DEFAULT_MAX_STORED_BODY_SIZE = "64KB";
-    public static final int DEFAULT_MAX_STORED_BODY_BYTES = (int) DataSize.ofKilobytes(64).toBytes();
 
     private final ActionRepository actionRepository;
     private final HttpActionRepository httpActionRepository;
@@ -48,7 +47,7 @@ public class ActionService {
         this.httpActionRepository = httpActionRepository;
         this.waitRegistry = waitRegistry;
         this.protocolHandlers = protocolHandlers;
-        this.maxStoredBodyBytes = (int) (maxStoredBodySize != null ? maxStoredBodySize.toBytes() : DEFAULT_MAX_STORED_BODY_BYTES);
+        this.maxStoredBodyBytes = (int) maxStoredBodySize.toBytes();
     }
 
     @Transactional
@@ -141,20 +140,23 @@ public class ActionService {
             throw new ApprovalConflictException(
                     "This action is no longer awaiting approval. Refresh and try again.");
         }
-        if (nextStatus == ActionStatus.ALLOWED) {
-            validateApproval(action, saveRule);
+        ProtocolApprovalHandler handler = protocolHandlers.stream()
+                .filter(h -> h.supports(action))
+                .findFirst()
+                .orElse(null);
+        if (nextStatus == ActionStatus.ALLOWED && handler != null) {
+            handler.validateApproval(action, saveRule);
         }
-        int changed = actionRepository.resolvePending(id, nextStatus);
-        if (changed == 0) {
+        if (actionRepository.resolvePending(id, nextStatus) == 0) {
             throw new ApprovalConflictException(
                     "This action is no longer awaiting approval. Refresh and try again.");
         }
-        if (saveRule) {
-            saveAllowRule(action);
+        if (saveRule && handler != null) {
+            handler.saveAllowRule(action);
         }
-        ActionEntity updated = getAction(id);
+        action.setStatus(nextStatus);
         waitRegistry.notifyResolved(id);
-        return updated;
+        return action;
     }
 
     @Transactional
@@ -162,8 +164,7 @@ public class ActionService {
         if (status != ActionStatus.CANCELLED && status != ActionStatus.EXPIRED) {
             throw new IllegalArgumentException("Expired or cancelled status is required");
         }
-        int changed = actionRepository.resolvePending(id, status);
-        if (changed > 0) {
+        if (actionRepository.resolvePending(id, status) > 0) {
             waitRegistry.notifyResolved(id);
         }
     }
@@ -185,23 +186,5 @@ public class ActionService {
             case "BLOCK", "DENIED", "REJECTED" -> ActionStatus.DENIED;
             default -> throw new IllegalArgumentException("Invalid approval decision: " + decision);
         };
-    }
-
-    private void validateApproval(ActionEntity action, boolean saveRule) {
-        for (ProtocolApprovalHandler handler : protocolHandlers) {
-            if (handler.supports(action)) {
-                handler.validateApproval(action, saveRule);
-                return;
-            }
-        }
-    }
-
-    private void saveAllowRule(ActionEntity action) {
-        for (ProtocolApprovalHandler handler : protocolHandlers) {
-            if (handler.supports(action)) {
-                handler.saveAllowRule(action);
-                return;
-            }
-        }
     }
 }
