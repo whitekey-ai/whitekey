@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 
 import tools.jackson.core.JsonParser;
 import tools.jackson.core.JsonToken;
+import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.io.ByteArrayInputStream;
@@ -35,7 +36,7 @@ public class CelBodyEvaluator {
     public static final String VAR_DATA = "data";
 
     private static final JsonMapper JSON = JsonMapper.builder()
-            .disable(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .build();
     private static final CelParser PARSER = CelParserFactory.standardCelParserBuilder().build();
 
@@ -62,6 +63,45 @@ public class CelBodyEvaluator {
             getOrCompile(expression.trim());
         } catch (Exception e) {
             throw new IllegalArgumentException("Invalid CEL body expression: " + e.getMessage(), e);
+        }
+    }
+
+    public boolean isValidJson(byte[] bodyBytes) {
+        if (bodyBytes == null || bodyBytes.length == 0) {
+            return true;
+        }
+        return isValidJson(new ByteArrayInputStream(bodyBytes));
+    }
+
+    public boolean isValidJson(Path filePath) {
+        try {
+            if (filePath == null || !Files.exists(filePath) || Files.size(filePath) == 0) {
+                return true;
+            }
+            try (InputStream in = Files.newInputStream(filePath)) {
+                return isValidJson(in);
+            }
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    public boolean isValidJson(InputStream inputStream) {
+        if (inputStream == null) {
+            return true;
+        }
+        try (JsonParser parser = JSON.createParser(inputStream)) {
+            JsonToken token = parser.nextToken();
+            if (token == null) {
+                return true;
+            }
+            if (token != JsonToken.START_OBJECT && token != JsonToken.START_ARRAY) {
+                return false;
+            }
+            parser.skipChildren();
+            return parser.nextToken() == null;
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -106,12 +146,9 @@ public class CelBodyEvaluator {
                     while (parser.nextToken() != JsonToken.END_OBJECT && parser.currentToken() != null) {
                         String propName = parser.currentName();
                         parser.nextToken(); // Move to property value
-                        if (vars.contains(propName) && !activation.containsKey(propName)) {
+                        if (vars.contains(propName)) {
                             Object val = JSON.readValue(parser, Object.class);
                             activation.put(propName, val != null ? val : NullValue.NULL_VALUE);
-                            if (activation.size() == vars.size()) {
-                                break;
-                            }
                         } else {
                             parser.skipChildren();
                         }
@@ -125,6 +162,9 @@ public class CelBodyEvaluator {
                     if (vars.contains(VAR_DATA)) {
                         activation.put(VAR_DATA, celVal);
                     }
+                }
+                if (token != null && parser.nextToken() != null) {
+                    return false;
                 }
             } catch (Exception e) {
                 return false;

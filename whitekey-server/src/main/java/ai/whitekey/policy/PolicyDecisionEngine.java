@@ -27,6 +27,7 @@ public final class PolicyDecisionEngine {
     public static final String RULE_DENIED_REASON = "A matching rule explicitly denies this action";
     public static final String RULE_REQUIRES_APPROVAL_REASON = "A matching rule requires human approval";
     public static final String RULE_ALLOWED_REASON = "Matching rules allow this action";
+    public static final String INVALID_BODY_REASON = "Request body is not valid JSON or contains duplicate keys";
 
     private final CelBodyEvaluator bodyEvaluator;
 
@@ -86,6 +87,11 @@ public final class PolicyDecisionEngine {
     }
 
     public Decision evaluateHttp(HttpActionEntity action, List<HttpRuleEntity> rules) {
+        if (action != null
+                && rules.stream().anyMatch(rule -> matchesActionHeaders(action, rule) && hasBodyCondition(rule))
+                && !bodyEvaluator.isValidJson(action.getBody())) {
+            return new Decision(RuleEffect.DENY, INVALID_BODY_REASON, List.of());
+        }
         return evaluateRules(rules, rule -> matchesHttp(action, rule));
     }
 
@@ -95,6 +101,9 @@ public final class PolicyDecisionEngine {
             HttpHeaders headers,
             Path bodyFile,
             List<HttpRuleEntity> rules) {
+        if (!bodyEvaluator.isValidJson(bodyFile)) {
+            return new Decision(RuleEffect.DENY, INVALID_BODY_REASON, List.of());
+        }
         return evaluateRules(rules, rule -> matchesHeaders(method, url, headers, rule) && matchesBody(rule, bodyFile));
     }
 
@@ -170,6 +179,10 @@ public final class PolicyDecisionEngine {
     }
 
     public boolean matchesHttp(HttpActionEntity action, HttpRuleEntity rule) {
+        return matchesActionHeaders(action, rule) && matchesBody(rule, action.getBody());
+    }
+
+    private static boolean matchesActionHeaders(HttpActionEntity action, HttpRuleEntity rule) {
         return action != null
                 && matchesRequestMetadata(
                         action.getMethod(),
@@ -178,8 +191,7 @@ public final class PolicyDecisionEngine {
                         action.getPath(),
                         action.getQueryParams(),
                         action.getHeaders(),
-                        rule)
-                && matchesBody(rule, action.getBody());
+                        rule);
     }
 
     private static boolean matchesRequestMetadata(
