@@ -12,7 +12,7 @@ Egress policy engine, control plane, and credential broker for AI agents. WhiteK
 docker compose up -d --build
 ```
 
-- Proxy listens on `whitekey:9999` inside the isolated `whitekey-sandbox` network.
+- Proxy listens on `127.0.0.1:9999` on the host and `whitekey:9999` inside the isolated `whitekey-sandbox` network.
 - Admin API binds to `127.0.0.1:1111` inside the container; run CLI commands via:
 
 ```bash

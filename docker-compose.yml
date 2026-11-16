@@ -3,6 +3,8 @@ services:
     build: .
     container_name: ${WHITEKEY_CONTAINER_NAME:-whitekey}
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:9999:9999"
     volumes:
       - ${WHITEKEY_HOST_DATA_DIR:-~/.local/share/whitekey}:/root/.local/share/whitekey
     networks:
