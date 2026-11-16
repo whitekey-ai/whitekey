@@ -1,5 +1,6 @@
 package ai.whitekey.proxy;
 
+import ai.whitekey.entity.RuleEffect;
 import ai.whitekey.proxy.AgentProxyService.ProxyResponse;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
@@ -166,7 +167,10 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
             return;
         }
 
-        if (preparedRequest.needsBody()) {
+        boolean spoolBody = preparedRequest.needsBody()
+                || (preparedRequest.evaluationResult() != null
+                        && preparedRequest.evaluationResult().effect() == RuleEffect.REQUIRE_APPROVAL);
+        if (spoolBody) {
             try {
                 tempFile = Files.createTempFile(TEMP_FILE_PREFIX, TEMP_FILE_SUFFIX);
                 spoolOut = Files.newOutputStream(tempFile);

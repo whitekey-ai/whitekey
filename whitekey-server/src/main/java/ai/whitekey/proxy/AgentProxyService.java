@@ -246,8 +246,10 @@ public class AgentProxyService {
             String proxyBaseUrl,
             Path tempBodyFile,
             CompletableFuture<Void> clientDisconnected) {
-        EvaluationResult decision = evaluationService.evaluateWithBodyFile(
-                prep.httpMethod(), prep.targetUri(), prep.cleanHeaders(), tempBodyFile);
+        EvaluationResult decision = prep.evaluationResult() != null
+                ? prep.evaluationResult()
+                : evaluationService.evaluateWithBodyFile(
+                        prep.httpMethod(), prep.targetUri(), prep.cleanHeaders(), tempBodyFile);
 
         if (decision.effect() == RuleEffect.DENY) {
             return ProxyResponse.jsonError(HttpStatus.FORBIDDEN.value(), ERROR_POLICY_DENIED, decision.reason());
