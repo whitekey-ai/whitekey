@@ -6,6 +6,7 @@ import ai.whitekey.entity.ActionStatus;
 import ai.whitekey.entity.HttpActionEntity;
 import ai.whitekey.exception.ApprovalConflictException;
 import ai.whitekey.exception.ResourceNotFoundException;
+import ai.whitekey.policy.HttpPolicyValidator;
 import ai.whitekey.proxy.ProxyTarget;
 import ai.whitekey.repository.ActionRepository;
 import ai.whitekey.repository.HttpActionRepository;
@@ -16,7 +17,6 @@ import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.unit.DataSize;
-import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
 import java.util.Arrays;
@@ -67,8 +67,8 @@ public class ActionService {
                 : "";
         String rawPath = (url != null) ? url.getRawPath() : null;
         String path = (rawPath != null && !rawPath.isEmpty()) ? rawPath : "/";
-        Map<String, List<String>> queryParams = (url != null && url.getRawQuery() != null && !url.getRawQuery().isBlank())
-                ? UriComponentsBuilder.fromUri(url).build().getQueryParams()
+        Map<String, List<String>> queryParams = (url != null)
+                ? HttpPolicyValidator.parseQueryParams(url.getRawQuery())
                 : Collections.emptyMap();
         HttpHeaders safeHeaders = headers != null ? HttpHeaders.readOnlyHttpHeaders(headers) : HttpHeaders.EMPTY;
         byte[] safeBody = body != null ? body : new byte[0];

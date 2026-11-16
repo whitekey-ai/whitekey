@@ -9,7 +9,6 @@ import ai.whitekey.proxy.ProxyTarget;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Component;
-import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
 import java.nio.file.Path;
@@ -174,7 +173,7 @@ public final class PolicyDecisionEngine {
         String rawPath = url.getRawPath();
         String path = (rawPath == null || rawPath.isEmpty()) ? "/" : rawPath;
 
-        Map<String, List<String>> queryParams = UriComponentsBuilder.fromUri(url).build().getQueryParams();
+        Map<String, List<String>> queryParams = HttpPolicyValidator.parseQueryParams(url.getRawQuery());
         return matchesRequestMetadata(method, host, port, path, queryParams, requestHeaders, rule);
     }
 

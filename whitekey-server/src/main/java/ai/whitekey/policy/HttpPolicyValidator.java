@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.IntPredicate;
 import java.util.regex.Pattern;
 
 @Component
@@ -29,6 +30,7 @@ public final class HttpPolicyValidator {
     private static final Pattern HTTP_METHOD_PATTERN = Pattern.compile("[a-z0-9!#$%&'*+.^_`|~\\-]+");
     private static final Pattern ASCII_PATH_PATTERN = Pattern.compile("/[A-Za-z0-9%/_~!$&'()+,;=:@.\\-]*");
     private static final Pattern HEX_BYTE_PATTERN = Pattern.compile("[0-9A-F]{2}");
+    private static final Pattern QUERY_HEX_BYTE_PATTERN = Pattern.compile("[0-9A-Fa-f]{2}");
 
     private final CelBodyEvaluator bodyEvaluator;
 
@@ -105,6 +107,36 @@ public final class HttpPolicyValidator {
     public String path(String input) {
         validatePath(requireText(input), false);
         return input;
+    }
+
+    public void query(String rawQuery) {
+        parseQueryParams(rawQuery);
+    }
+
+    public static Map<String, List<String>> parseQueryParams(String rawQuery) {
+        if (rawQuery == null || rawQuery.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, List<String>> params = new LinkedHashMap<>();
+        for (String segment : rawQuery.split("&", -1)) {
+            if (segment.isEmpty()) {
+                throw new IllegalArgumentException("Invalid empty query parameter");
+            }
+            int eq = segment.indexOf('=');
+            String rawKey = eq >= 0 ? segment.substring(0, eq) : segment;
+            String key = decodeQueryComponent(rawKey);
+            if (key.isBlank()) {
+                throw new IllegalArgumentException("Query param name must not be blank");
+            }
+            if (params.containsKey(key)) {
+                throw new IllegalArgumentException("Duplicate query parameter: " + key);
+            }
+            List<String> values = eq >= 0
+                    ? List.of(decodeQueryComponent(segment.substring(eq + 1)))
+                    : List.of();
+            params.put(key, values);
+        }
+        return Collections.unmodifiableMap(params);
     }
 
     public List<String> pathPatterns(List<String> input) {
@@ -196,7 +228,7 @@ public final class HttpPolicyValidator {
                             + " in rules");
         }
         if (path.contains("%")) {
-            validateEncodedPath(path);
+            decodePercentUtf8(path, HEX_BYTE_PATTERN, b -> b < ASCII_BOUNDARY, "path");
         }
         for (String segment : path.split("/", -1)) {
             if (segment.equals(".") || segment.equals("..")) {
@@ -205,31 +237,51 @@ public final class HttpPolicyValidator {
         }
     }
 
-    private static void validateEncodedPath(String path) {
-        var decoded = new ByteArrayOutputStream();
-        for (int i = 0; i < path.length(); i++) {
-            char c = path.charAt(i);
+    private static String decodeQueryComponent(String input) {
+        if (input.indexOf('%') < 0) {
+            return input;
+        }
+        return decodePercentUtf8(input, QUERY_HEX_BYTE_PATTERN, HttpPolicyValidator::isUnreservedAscii, "query parameter");
+    }
+
+    private static String decodePercentUtf8(
+            String input, Pattern hexPattern, IntPredicate rejectedByte, String context) {
+        var decoded = new ByteArrayOutputStream(input.length());
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
             if (c != '%') {
-                decoded.write(c);
+                if (c < ASCII_BOUNDARY) {
+                    decoded.write(c);
+                } else {
+                    decoded.writeBytes(Character.toString(c).getBytes(StandardCharsets.UTF_8));
+                }
                 continue;
             }
-            if (i + 2 >= path.length() || !HEX_BYTE_PATTERN.matcher(path.substring(i + 1, i + 3)).matches()) {
-                throw new IllegalArgumentException("Invalid encoded path");
+            if (i + 2 >= input.length() || !hexPattern.matcher(input.substring(i + 1, i + 3)).matches()) {
+                throw new IllegalArgumentException("Invalid encoded " + context);
             }
-            int b = Integer.parseInt(path.substring(i + 1, i + 3), HEX_RADIX);
+            int b = Integer.parseInt(input.substring(i + 1, i + 3), HEX_RADIX);
             i += 2;
-            if (b < ASCII_BOUNDARY) {
-                throw new IllegalArgumentException("Noncanonical encoded path");
+            if (rejectedByte.test(b)) {
+                throw new IllegalArgumentException("Noncanonical encoded " + context);
             }
             decoded.write(b);
         }
         try {
-            StandardCharsets.UTF_8
+            return StandardCharsets.UTF_8
                     .newDecoder()
                     .onMalformedInput(CodingErrorAction.REPORT)
-                    .decode(ByteBuffer.wrap(decoded.toByteArray()));
+                    .decode(ByteBuffer.wrap(decoded.toByteArray()))
+                    .toString();
         } catch (CharacterCodingException ignored) {
-            throw new IllegalArgumentException("Invalid UTF-8 path");
+            throw new IllegalArgumentException("Invalid UTF-8 " + context);
         }
+    }
+
+    private static boolean isUnreservedAscii(int b) {
+        return (b >= 'A' && b <= 'Z')
+                || (b >= 'a' && b <= 'z')
+                || (b >= '0' && b <= '9')
+                || b == '-' || b == '.' || b == '_';
     }
 }

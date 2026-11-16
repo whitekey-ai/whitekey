@@ -216,6 +216,7 @@ public class AgentProxyService {
             validator.method(method);
             validator.host(target.host());
             validator.path(target.path());
+            validator.query(rawQuery);
             targetUri = target.toUri(rawQuery);
             cleanHeaders = sanitizeRequestHeaders(requestHeaders);
             httpMethod = HttpMethod.valueOf(method.toUpperCase(Locale.ROOT));
