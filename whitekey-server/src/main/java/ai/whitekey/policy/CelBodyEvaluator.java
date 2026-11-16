@@ -28,6 +28,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 
 @Component
 public class CelBodyEvaluator {
@@ -67,23 +68,11 @@ public class CelBodyEvaluator {
     }
 
     public boolean isValidJson(byte[] bodyBytes) {
-        if (bodyBytes == null || bodyBytes.length == 0) {
-            return true;
-        }
-        return isValidJson(new ByteArrayInputStream(bodyBytes));
+        return withStream(bodyBytes, this::isValidJson);
     }
 
     public boolean isValidJson(Path filePath) {
-        try {
-            if (filePath == null || !Files.exists(filePath) || Files.size(filePath) == 0) {
-                return true;
-            }
-            try (InputStream in = Files.newInputStream(filePath)) {
-                return isValidJson(in);
-            }
-        } catch (IOException e) {
-            return false;
-        }
+        return withStream(filePath, this::isValidJson);
     }
 
     public boolean isValidJson(InputStream inputStream) {
@@ -106,19 +95,27 @@ public class CelBodyEvaluator {
     }
 
     public boolean matches(String expression, byte[] bodyBytes) {
-        if (bodyBytes == null || bodyBytes.length == 0) {
-            return matches(expression, (InputStream) null);
-        }
-        return matches(expression, new ByteArrayInputStream(bodyBytes));
+        return withStream(bodyBytes, in -> matches(expression, in));
     }
 
     public boolean matches(String expression, Path filePath) {
+        return withStream(filePath, in -> matches(expression, in));
+    }
+
+    private static boolean withStream(byte[] bodyBytes, Predicate<InputStream> consumer) {
+        if (bodyBytes == null || bodyBytes.length == 0) {
+            return consumer.test(null);
+        }
+        return consumer.test(new ByteArrayInputStream(bodyBytes));
+    }
+
+    private static boolean withStream(Path filePath, Predicate<InputStream> consumer) {
         try {
             if (filePath == null || !Files.exists(filePath) || Files.size(filePath) == 0) {
-                return matches(expression, (InputStream) null);
+                return consumer.test(null);
             }
             try (InputStream in = Files.newInputStream(filePath)) {
-                return matches(expression, in);
+                return consumer.test(in);
             }
         } catch (IOException e) {
             return false;
