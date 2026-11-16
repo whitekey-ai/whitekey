@@ -153,9 +153,7 @@ public class AgentProxyService {
             targetUri = target.toUri(null);
             cleanHeaders = sanitizeRequestHeaders(requestHeaders);
         } catch (IllegalArgumentException error) {
-            return new PreparedRequest(
-                    null, null, null, null, false, null,
-                    ProxyResponse.jsonError(HttpStatus.BAD_REQUEST.value(), ERROR_INVALID_REQUEST, error.getMessage()));
+            return invalidRequest(error);
         }
 
         HttpMethod connect = HttpMethod.valueOf(io.netty.handler.codec.http.HttpMethod.CONNECT.name());
@@ -163,14 +161,7 @@ public class AgentProxyService {
         EvaluationResult result = headerEval.needsBody()
                 ? evaluationService.evaluateWithBodyFile(connect, targetUri, cleanHeaders, null)
                 : headerEval.finalResult();
-
-        if (result.effect() == RuleEffect.DENY) {
-            return new PreparedRequest(
-                    target, targetUri, connect, cleanHeaders, false, result,
-                    ProxyResponse.jsonError(HttpStatus.FORBIDDEN.value(), ERROR_POLICY_DENIED, result.reason()));
-        }
-
-        return new PreparedRequest(target, targetUri, connect, cleanHeaders, false, result, null);
+        return finalizePreparedRequest(target, targetUri, connect, cleanHeaders, result);
     }
 
     /**
@@ -221,24 +212,32 @@ public class AgentProxyService {
             cleanHeaders = sanitizeRequestHeaders(requestHeaders);
             httpMethod = HttpMethod.valueOf(method.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException error) {
-            return new PreparedRequest(
-                    null, null, null, null, false, null,
-                    ProxyResponse.jsonError(HttpStatus.BAD_REQUEST.value(), ERROR_INVALID_REQUEST, error.getMessage()));
+            return invalidRequest(error);
         }
 
         HeaderEvaluationResult headerEval = evaluationService.evaluateHeaders(httpMethod, targetUri, cleanHeaders);
         if (headerEval.needsBody()) {
             return new PreparedRequest(target, targetUri, httpMethod, cleanHeaders, true, null, null);
         }
+        return finalizePreparedRequest(target, targetUri, httpMethod, cleanHeaders, headerEval.finalResult());
+    }
 
-        EvaluationResult result = headerEval.finalResult();
-        if (result.effect() == RuleEffect.DENY) {
-            return new PreparedRequest(
-                    target, targetUri, httpMethod, cleanHeaders, false, result,
-                    ProxyResponse.jsonError(HttpStatus.FORBIDDEN.value(), ERROR_POLICY_DENIED, result.reason()));
-        }
+    private static PreparedRequest invalidRequest(IllegalArgumentException error) {
+        return new PreparedRequest(
+                null, null, null, null, false, null,
+                ProxyResponse.jsonError(HttpStatus.BAD_REQUEST.value(), ERROR_INVALID_REQUEST, error.getMessage()));
+    }
 
-        return new PreparedRequest(target, targetUri, httpMethod, cleanHeaders, false, result, null);
+    private static PreparedRequest finalizePreparedRequest(
+            ProxyTarget target,
+            URI targetUri,
+            HttpMethod method,
+            HttpHeaders cleanHeaders,
+            EvaluationResult result) {
+        ProxyResponse denyError = result.effect() == RuleEffect.DENY
+                ? ProxyResponse.jsonError(HttpStatus.FORBIDDEN.value(), ERROR_POLICY_DENIED, result.reason())
+                : null;
+        return new PreparedRequest(target, targetUri, method, cleanHeaders, false, result, denyError);
     }
 
     public ProxyResponse handleWithBodyFile(
@@ -255,18 +254,12 @@ public class AgentProxyService {
             return ProxyResponse.jsonError(HttpStatus.FORBIDDEN.value(), ERROR_POLICY_DENIED, decision.reason());
         }
 
-        ProxyResponse authError = authorizeExecution(decision, clientDisconnected);
-        if (authError != null) {
-            return authError;
-        }
-        UUID actionId = decision.action().getId();
-
         try {
             HttpRequest.BodyPublisher publisher =
                     (tempBodyFile == null || !Files.exists(tempBodyFile) || Files.size(tempBodyFile) == 0)
                             ? HttpRequest.BodyPublishers.noBody()
                             : HttpRequest.BodyPublishers.ofFile(tempBodyFile);
-            return forwardUpstream(actionId, proxyBaseUrl, prep.target(), prep.targetUri(), prep.httpMethod().name(), prep.cleanHeaders(), publisher);
+            return forwardAuthorized(prep, decision, proxyBaseUrl, publisher, clientDisconnected);
         } catch (IOException e) {
             return ProxyResponse.jsonError(HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_BODY_READ, "Failed reading request body file");
         }
@@ -277,18 +270,31 @@ public class AgentProxyService {
             String proxyBaseUrl,
             InputStream bodyStream,
             CompletableFuture<Void> clientDisconnected) {
-        ProxyResponse authError = authorizeExecution(prep.evaluationResult(), clientDisconnected);
-        if (authError != null) {
-            return authError;
-        }
-        UUID actionId = prep.evaluationResult().action().getId();
-
         HttpRequest.BodyPublisher publisher =
                 bodyStream == null
                         ? HttpRequest.BodyPublishers.noBody()
                         : HttpRequest.BodyPublishers.ofInputStream(() -> bodyStream);
+        return forwardAuthorized(prep, prep.evaluationResult(), proxyBaseUrl, publisher, clientDisconnected);
+    }
 
-        return forwardUpstream(actionId, proxyBaseUrl, prep.target(), prep.targetUri(), prep.httpMethod().name(), prep.cleanHeaders(), publisher);
+    private ProxyResponse forwardAuthorized(
+            PreparedRequest prep,
+            EvaluationResult decision,
+            String proxyBaseUrl,
+            HttpRequest.BodyPublisher publisher,
+            CompletableFuture<Void> clientDisconnected) {
+        ProxyResponse authError = authorizeExecution(decision, clientDisconnected);
+        if (authError != null) {
+            return authError;
+        }
+        return forwardUpstream(
+                decision.action().getId(),
+                proxyBaseUrl,
+                prep.target(),
+                prep.targetUri(),
+                prep.httpMethod().name(),
+                prep.cleanHeaders(),
+                publisher);
     }
 
 
@@ -367,9 +373,7 @@ public class AgentProxyService {
 
         effectiveHeaders.forEach(
                 (name, values) -> {
-                    String lower = name.toLowerCase(Locale.ROOT);
-                    if (HOP_BY_HOP_HEADERS.contains(lower)
-                            || lower.startsWith(WHITEKEY_HEADER_PREFIX)) {
+                    if (isFilteredRequestHeader(name)) {
                         return;
                     }
                     for (String value : values) {
@@ -381,55 +385,64 @@ public class AgentProxyService {
             HttpResponse<InputStream> upstream =
                     httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
 
-            Map<String, List<String>> responseHeaders = new LinkedHashMap<>();
-            for (Map.Entry<String, List<String>> header : upstream.headers().map().entrySet()) {
-                String lower = header.getKey().toLowerCase(Locale.ROOT);
-                if (HOP_BY_HOP_HEADERS.contains(lower) || lower.startsWith(":")) {
-                    continue;
-                }
-                if (HttpHeaderNames.LOCATION.contentEqualsIgnoreCase(lower)
-                        && upstream.statusCode() >= HttpStatus.MULTIPLE_CHOICES.value()
-                        && upstream.statusCode() < HttpStatus.BAD_REQUEST.value()) {
-                    List<String> rewritten =
-                            header.getValue().stream()
-                                    .map(loc -> target.rewriteRedirectLocation(proxyBaseUrl, loc))
-                                    .toList();
-                    responseHeaders.put(header.getKey(), rewritten);
-                } else {
-                    responseHeaders.put(header.getKey(), new ArrayList<>(header.getValue()));
-                }
-            }
-
             return ProxyResponse.ofStream(
                     upstream.statusCode(),
-                    responseHeaders,
+                    copyResponseHeaders(upstream, target, proxyBaseUrl),
                     upstream.body());
         } catch (SSLException sslError) {
-            String reason = "Upstream TLS handshake failed";
-            actionService.updateStatus(actionId, ActionStatus.FAILED);
-            return ProxyResponse.jsonError(HttpStatus.BAD_GATEWAY.value(), ERROR_UPSTREAM_TLS_FAILED, reason);
+            return upstreamFailure(actionId, ActionStatus.FAILED, HttpStatus.BAD_GATEWAY, ERROR_UPSTREAM_TLS_FAILED, "Upstream TLS handshake failed");
         } catch (ConnectException connectError) {
-            String reason = "Could not connect to upstream host";
-            actionService.updateStatus(actionId, ActionStatus.FAILED);
-            return ProxyResponse.jsonError(HttpStatus.BAD_GATEWAY.value(), ERROR_UPSTREAM_CONNECT_FAILED, reason);
+            return upstreamFailure(actionId, ActionStatus.FAILED, HttpStatus.BAD_GATEWAY, ERROR_UPSTREAM_CONNECT_FAILED, "Could not connect to upstream host");
         } catch (IOException ioError) {
-            String reason = "Upstream request failed or timed out";
-            actionService.updateStatus(actionId, ActionStatus.FAILED);
-            return ProxyResponse.jsonError(HttpStatus.BAD_GATEWAY.value(), ERROR_UPSTREAM_IO_FAILED, reason);
+            return upstreamFailure(actionId, ActionStatus.FAILED, HttpStatus.BAD_GATEWAY, ERROR_UPSTREAM_IO_FAILED, "Upstream request failed or timed out");
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            String reason = "Upstream request interrupted";
-            actionService.updateStatus(actionId, ActionStatus.CANCELLED);
-            return ProxyResponse.jsonError(HttpStatus.SERVICE_UNAVAILABLE.value(), ERROR_INTERRUPTED, reason);
+            return upstreamFailure(actionId, ActionStatus.CANCELLED, HttpStatus.SERVICE_UNAVAILABLE, ERROR_INTERRUPTED, "Upstream request interrupted");
         }
+    }
+
+    private ProxyResponse upstreamFailure(
+            UUID actionId,
+            ActionStatus actionStatus,
+            HttpStatus httpStatus,
+            String errorCode,
+            String reason) {
+        actionService.updateStatus(actionId, actionStatus);
+        return ProxyResponse.jsonError(httpStatus.value(), errorCode, reason);
+    }
+
+    private static Map<String, List<String>> copyResponseHeaders(
+            HttpResponse<InputStream> upstream,
+            ProxyTarget target,
+            String proxyBaseUrl) {
+        Map<String, List<String>> responseHeaders = new LinkedHashMap<>();
+        boolean isRedirect = upstream.statusCode() >= HttpStatus.MULTIPLE_CHOICES.value()
+                && upstream.statusCode() < HttpStatus.BAD_REQUEST.value();
+        for (Map.Entry<String, List<String>> header : upstream.headers().map().entrySet()) {
+            String lower = header.getKey().toLowerCase(Locale.ROOT);
+            if (HOP_BY_HOP_HEADERS.contains(lower) || lower.startsWith(":")) {
+                continue;
+            }
+            List<String> values = isRedirect && HttpHeaderNames.LOCATION.contentEqualsIgnoreCase(lower)
+                    ? header.getValue().stream()
+                            .map(loc -> target.rewriteRedirectLocation(proxyBaseUrl, loc))
+                            .toList()
+                    : new ArrayList<>(header.getValue());
+            responseHeaders.put(header.getKey(), values);
+        }
+        return responseHeaders;
+    }
+
+    private static boolean isFilteredRequestHeader(String name) {
+        String lower = name.toLowerCase(Locale.ROOT);
+        return HOP_BY_HOP_HEADERS.contains(lower) || lower.startsWith(WHITEKEY_HEADER_PREFIX);
     }
 
     private static HttpHeaders sanitizeRequestHeaders(HttpHeaders headers) {
         HttpHeaders clean = new HttpHeaders();
         headers.forEach(
                 (name, values) -> {
-                    String lower = name.toLowerCase(Locale.ROOT);
-                    if (!HOP_BY_HOP_HEADERS.contains(lower) && !lower.startsWith(WHITEKEY_HEADER_PREFIX)) {
+                    if (!isFilteredRequestHeader(name)) {
                         clean.put(name, List.copyOf(values));
                     }
                 });
