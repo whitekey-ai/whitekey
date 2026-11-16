@@ -7,6 +7,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
@@ -40,6 +41,7 @@ import java.io.PipedOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
@@ -107,24 +109,11 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
 
     private void handleHttpRequest(ChannelHandlerContext ctx, HttpRequest req) {
         if (!req.decoderResult().isSuccess()) {
-            ProxyResponseWriter.write(
-                    ctx,
-                    "GET",
-                    ProxyResponse.jsonError(HttpStatus.BAD_REQUEST.value(), AgentProxyService.ERROR_INVALID_REQUEST, ERROR_MALFORMED_REQUEST),
-                    false);
-            state = State.DISCARDING;
+            failAndDiscard(ctx, "GET", HttpStatus.BAD_REQUEST, AgentProxyService.ERROR_INVALID_REQUEST, ERROR_MALFORMED_REQUEST);
             return;
         }
         if (state != State.IDLE) {
-            ProxyResponseWriter.write(
-                    ctx,
-                    req.method().name(),
-                    ProxyResponse.jsonError(
-                            HttpStatus.BAD_REQUEST.value(),
-                            ERROR_PIPELINING_UNSUPPORTED,
-                            MSG_PIPELINING_UNSUPPORTED),
-                    false);
-            state = State.DISCARDING;
+            failAndDiscard(ctx, req.method().name(), HttpStatus.BAD_REQUEST, ERROR_PIPELINING_UNSUPPORTED, MSG_PIPELINING_UNSUPPORTED);
             return;
         }
 
@@ -135,20 +124,11 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
         int hashIdx = rawUri.indexOf('#');
         String withoutFragment = hashIdx >= 0 ? rawUri.substring(0, hashIdx) : rawUri;
         int queryIdx = withoutFragment.indexOf('?');
-        String rawPath =
-                queryIdx >= 0 ? withoutFragment.substring(0, queryIdx) : withoutFragment;
+        String rawPath = queryIdx >= 0 ? withoutFragment.substring(0, queryIdx) : withoutFragment;
         String rawQuery = queryIdx >= 0 ? withoutFragment.substring(queryIdx + 1) : null;
 
-        HttpHeaders requestHeaders = new HttpHeaders();
-        for (String name : req.headers().names()) {
-            requestHeaders.put(name, List.copyOf(req.headers().getAll(name)));
-        }
-
-        String hostHeader = req.headers().get(HttpHeaderNames.HOST);
-        proxyBaseUrl =
-                hostHeader != null && !hostHeader.isBlank()
-                        ? "http://" + hostHeader
-                        : "http://" + defaultAddress + ":" + boundPort;
+        HttpHeaders requestHeaders = copyRequestHeaders(req);
+        proxyBaseUrl = resolveProxyBaseUrl(req);
 
         clientDisconnected = new CompletableFuture<>();
         closeListener = future -> clientDisconnected.complete(null);
@@ -160,10 +140,8 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
         }
 
         preparedRequest = proxyService.prepare(currentMethod, rawPath, rawQuery, requestHeaders);
-
         if (preparedRequest.immediateError() != null) {
-            ProxyResponseWriter.write(ctx, currentMethod, preparedRequest.immediateError(), false);
-            state = State.DISCARDING;
+            failAndDiscard(ctx, currentMethod, preparedRequest.immediateError());
             return;
         }
 
@@ -171,51 +149,42 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
                 || (preparedRequest.evaluationResult() != null
                         && preparedRequest.evaluationResult().effect() == RuleEffect.REQUIRE_APPROVAL);
         if (spoolBody) {
-            try {
-                tempFile = Files.createTempFile(TEMP_FILE_PREFIX, TEMP_FILE_SUFFIX);
-                spoolOut = Files.newOutputStream(tempFile);
-                state = State.SPOOLING;
-            } catch (IOException e) {
-                ProxyResponseWriter.write(
-                        ctx,
-                        currentMethod,
-                        ProxyResponse.jsonError(HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_TEMP_FILE, MSG_TEMP_FILE),
-                        false);
-                state = State.DISCARDING;
-            }
+            startSpooling(ctx);
         } else {
-            try {
-                pipedOut = new PipedOutputStream();
-                PipedInputStream pis = new PipedInputStream(pipedOut, PIPE_BUFFER_SIZE);
-                state = State.STREAMING;
+            startStreaming(ctx);
+        }
+    }
 
-                virtualExecutor.execute(
-                        () -> {
-                            ProxyResponse response;
-                            try {
-                                response =
-                                        proxyService.handleStream(
-                                                preparedRequest,
-                                                proxyBaseUrl,
-                                                pis,
-                                                clientDisconnected);
-                            } catch (Exception unexpected) {
-                                log.error("Unexpected error in streaming proxy", unexpected);
-                                response =
-                                        ProxyResponse.jsonError(
-                                                HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_INTERNAL, MSG_INTERNAL_ERROR);
-                            }
-                            sendResponseFromVirtualThread(
-                                    ctx, currentMethod, response, keepAlive);
-                        });
-            } catch (IOException e) {
-                ProxyResponseWriter.write(
-                        ctx,
-                        currentMethod,
-                        ProxyResponse.jsonError(HttpStatus.INTERNAL_SERVER_ERROR.value(), "stream_init_error", "Failed initializing pipe"),
-                        false);
-                state = State.DISCARDING;
-            }
+    private void startSpooling(ChannelHandlerContext ctx) {
+        try {
+            tempFile = Files.createTempFile(TEMP_FILE_PREFIX, TEMP_FILE_SUFFIX);
+            spoolOut = Files.newOutputStream(tempFile);
+            state = State.SPOOLING;
+        } catch (IOException e) {
+            failAndDiscard(ctx, currentMethod, HttpStatus.INTERNAL_SERVER_ERROR, ERROR_TEMP_FILE, MSG_TEMP_FILE);
+        }
+    }
+
+    private void startStreaming(ChannelHandlerContext ctx) {
+        try {
+            pipedOut = new PipedOutputStream();
+            PipedInputStream pis = new PipedInputStream(pipedOut, PIPE_BUFFER_SIZE);
+            state = State.STREAMING;
+
+            AgentProxyService.PreparedRequest prep = preparedRequest;
+            String baseUrl = proxyBaseUrl;
+            String method = currentMethod;
+            boolean keepConn = keepAlive;
+            CompletableFuture<Void> disconnected = clientDisconnected;
+
+            executeProxyTask(
+                    ctx,
+                    method,
+                    keepConn,
+                    () -> proxyService.handleStream(prep, baseUrl, pis, disconnected),
+                    null);
+        } catch (IOException e) {
+            failAndDiscard(ctx, currentMethod, HttpStatus.INTERNAL_SERVER_ERROR, "stream_init_error", "Failed initializing pipe");
         }
     }
 
@@ -223,28 +192,29 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
             ChannelHandlerContext ctx, String rawUri, HttpHeaders requestHeaders) {
         preparedRequest = proxyService.prepareConnect(rawUri, requestHeaders);
         if (preparedRequest.immediateError() != null) {
-            ProxyResponseWriter.write(ctx, currentMethod, preparedRequest.immediateError(), false);
-            state = State.DISCARDING;
+            failAndDiscard(ctx, currentMethod, preparedRequest.immediateError());
             return;
         }
 
         state = State.TUNNELING;
+        AgentProxyService.PreparedRequest prep = preparedRequest;
+        String method = currentMethod;
+        CompletableFuture<Void> disconnected = clientDisconnected;
+
         virtualExecutor.execute(
                 () -> {
                     ProxyResponse error;
                     try {
-                        error = proxyService.authorizeTunnel(preparedRequest, clientDisconnected);
+                        error = proxyService.authorizeTunnel(prep, disconnected);
                     } catch (Exception unexpected) {
                         log.error("Unexpected error authorizing CONNECT tunnel", unexpected);
-                        error =
-                                ProxyResponse.jsonError(
-                                        HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_INTERNAL, MSG_INTERNAL_ERROR);
+                        error = ProxyResponse.jsonError(HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_INTERNAL, MSG_INTERNAL_ERROR);
                     }
                     if (error != null) {
-                        sendResponseFromVirtualThread(ctx, currentMethod, error, false);
+                        sendResponseFromVirtualThread(ctx, method, error, false);
                         return;
                     }
-                    ProxyTarget target = preparedRequest.target();
+                    ProxyTarget target = prep.target();
                     ctx.executor().execute(() -> openConnectTunnel(ctx, target.host(), target.port()));
                 });
     }
@@ -305,15 +275,9 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
                                     return;
                                 }
                                 ChannelPipeline pipeline = ctx.pipeline();
-                                if (pipeline.get(HttpServerCodec.class) != null) {
-                                    pipeline.remove(HttpServerCodec.class);
-                                }
-                                if (pipeline.get(HttpServerExpectContinueHandler.class) != null) {
-                                    pipeline.remove(HttpServerExpectContinueHandler.class);
-                                }
-                                if (pipeline.get(ProxyInboundHandler.class) != null) {
-                                    pipeline.remove(this);
-                                }
+                                removeHandler(pipeline, HttpServerCodec.class);
+                                removeHandler(pipeline, HttpServerExpectContinueHandler.class);
+                                removeHandler(pipeline, ProxyInboundHandler.class);
                                 pipeline.addLast(new TunnelRelayHandler(outbound));
                                 outbound.pipeline().addLast(new TunnelRelayHandler(ctx.channel()));
 
@@ -337,14 +301,9 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
                 try {
                     data.readBytes(spoolOut, data.readableBytes());
                 } catch (IOException e) {
+                    String method = currentMethod;
                     cleanup(ctx);
-                    ProxyResponseWriter.write(
-                            ctx,
-                            currentMethod,
-                            ProxyResponse.jsonError(
-                                    HttpStatus.INTERNAL_SERVER_ERROR.value(), "spool_error", "Failed writing to temp file"),
-                            false);
-                    state = State.DISCARDING;
+                    failAndDiscard(ctx, method, HttpStatus.INTERNAL_SERVER_ERROR, "spool_error", "Failed writing to temp file");
                     return;
                 }
             }
@@ -354,27 +313,18 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
 
                 Path file = tempFile;
                 tempFile = null;
-                virtualExecutor.execute(
-                        () -> {
-                            ProxyResponse response;
-                            try {
-                                response =
-                                        proxyService.handleWithBodyFile(
-                                                preparedRequest,
-                                                proxyBaseUrl,
-                                                file,
-                                                clientDisconnected);
-                            } catch (Exception unexpected) {
-                                log.error("Unexpected error in spooled body execution", unexpected);
-                                response =
-                                        ProxyResponse.jsonError(
-                                                HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_INTERNAL, MSG_INTERNAL_ERROR);
-                            } finally {
-                                deleteQuietly(file);
-                            }
-                            sendResponseFromVirtualThread(
-                                    ctx, currentMethod, response, keepAlive);
-                        });
+                AgentProxyService.PreparedRequest prep = preparedRequest;
+                String baseUrl = proxyBaseUrl;
+                String method = currentMethod;
+                boolean keepConn = keepAlive;
+                CompletableFuture<Void> disconnected = clientDisconnected;
+
+                executeProxyTask(
+                        ctx,
+                        method,
+                        keepConn,
+                        () -> proxyService.handleWithBodyFile(prep, baseUrl, file, disconnected),
+                        () -> deleteQuietly(file));
             }
         } else if (state == State.STREAMING) {
             if (hasBytes && pipedOut != null) {
@@ -390,6 +340,64 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
                 closeQuietly(pipedOut);
                 pipedOut = null;
             }
+        }
+    }
+
+    private void executeProxyTask(
+            ChannelHandlerContext ctx,
+            String method,
+            boolean keepConn,
+            Callable<ProxyResponse> task,
+            Runnable onFinally) {
+        virtualExecutor.execute(
+                () -> {
+                    ProxyResponse response;
+                    try {
+                        response = task.call();
+                    } catch (Exception unexpected) {
+                        log.error("Unexpected error in proxy execution", unexpected);
+                        response = ProxyResponse.jsonError(HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_INTERNAL, MSG_INTERNAL_ERROR);
+                    } finally {
+                        if (onFinally != null) {
+                            onFinally.run();
+                        }
+                    }
+                    sendResponseFromVirtualThread(ctx, method, response, keepConn);
+                });
+    }
+
+    private void failAndDiscard(
+            ChannelHandlerContext ctx,
+            String method,
+            HttpStatus status,
+            String errorCode,
+            String message) {
+        failAndDiscard(ctx, method, ProxyResponse.jsonError(status.value(), errorCode, message));
+    }
+
+    private void failAndDiscard(ChannelHandlerContext ctx, String method, ProxyResponse response) {
+        ProxyResponseWriter.write(ctx, method, response, false);
+        state = State.DISCARDING;
+    }
+
+    private static HttpHeaders copyRequestHeaders(HttpRequest req) {
+        HttpHeaders headers = new HttpHeaders();
+        for (String name : req.headers().names()) {
+            headers.put(name, List.copyOf(req.headers().getAll(name)));
+        }
+        return headers;
+    }
+
+    private String resolveProxyBaseUrl(HttpRequest req) {
+        String hostHeader = req.headers().get(HttpHeaderNames.HOST);
+        return (hostHeader != null && !hostHeader.isBlank())
+                ? "http://" + hostHeader
+                : "http://" + defaultAddress + ":" + boundPort;
+    }
+
+    private static void removeHandler(ChannelPipeline pipeline, Class<? extends ChannelHandler> type) {
+        if (pipeline.get(type) != null) {
+            pipeline.remove(type);
         }
     }
 
