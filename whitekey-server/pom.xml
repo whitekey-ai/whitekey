@@ -10,7 +10,7 @@
 
 	<artifactId>whitekey-server</artifactId>
 	<name>whitekey-server</name>
-	<description>WhiteKey Server Daemon &amp; Security Proxy</description>
+	<description>WhiteKey Server &amp; Egress Policy Proxy</description>
 
 	<dependencies>
 		<dependency>

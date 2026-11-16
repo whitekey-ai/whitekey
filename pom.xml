@@ -14,7 +14,7 @@
 	<version>0.0.1-SNAPSHOT</version>
 	<packaging>pom</packaging>
 	<name>whitekey</name>
-	<description>WhiteKey - Security Proxy Gateway &amp; Secret Broker for AI Agents</description>
+	<description>WhiteKey - Egress Policy Engine, Control Plane &amp; Credential Broker for AI Agents</description>
 
 	<modules>
 		<module>whitekey-api</module>

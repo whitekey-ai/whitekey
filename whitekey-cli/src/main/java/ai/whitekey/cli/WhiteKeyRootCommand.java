@@ -6,7 +6,7 @@ import picocli.CommandLine.Option;
 
 @Command(
         name = "whitekey",
-        description = "WhiteKey - Security Proxy Gateway & Secret Broker for AI Agents",
+        description = "WhiteKey - Egress Policy Engine, Control Plane & Credential Broker for AI Agents",
         version = "0.0.1",
         subcommands = {
                 StatusCommand.class,
