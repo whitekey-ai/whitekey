@@ -1,8 +1,8 @@
 package ai.whitekey.proxy;
 
 import ai.whitekey.proxy.AgentProxyService.ProxyResponse;
-import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
@@ -17,6 +17,7 @@ import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import org.springframework.util.unit.DataSize;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +32,15 @@ final class ProxyResponseWriter {
             String requestMethod,
             ProxyResponse response,
             boolean keepAlive) {
+        write(ctx, requestMethod, response, keepAlive, null);
+    }
+
+    public static void write(
+            ChannelHandlerContext ctx,
+            String requestMethod,
+            ProxyResponse response,
+            boolean keepAlive,
+            Runnable beforeFinalFlush) {
         boolean head = HttpMethod.HEAD.name().equalsIgnoreCase(requestMethod);
         boolean noContent = response.statusCode() == HttpResponseStatus.NO_CONTENT.code()
                 || response.statusCode() == HttpResponseStatus.NOT_MODIFIED.code();
@@ -44,6 +54,7 @@ final class ProxyResponseWriter {
             HttpUtil.setKeepAlive(nettyResponse, keepAlive);
             ctx.writeAndFlush(nettyResponse);
 
+            boolean streamFailed = false;
             try (InputStream in = response.bodyStream()) {
                 byte[] chunk = new byte[BUFFER_SIZE];
                 int read;
@@ -51,15 +62,26 @@ final class ProxyResponseWriter {
                     ctx.writeAndFlush(new DefaultHttpContent(Unpooled.copiedBuffer(chunk, 0, read)));
                 }
             } catch (Exception ignored) {
+                streamFailed = true;
             }
 
-            if (keepAlive && ctx.channel().isOpen()) {
-                ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
-            } else {
-                ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT)
-                        .addListener(ChannelFutureListener.CLOSE);
-            }
+            boolean abortStream = streamFailed || !ctx.channel().isOpen();
+            boolean closeAfter = !keepAlive;
+            runOnEventLoop(ctx, () -> {
+                if (beforeFinalFlush != null) {
+                    beforeFinalFlush.run();
+                }
+                if (abortStream) {
+                    ctx.close();
+                } else {
+                    ChannelFuture future = ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
+                    if (closeAfter) {
+                        future.addListener(ChannelFutureListener.CLOSE);
+                    }
+                }
+            });
         } else {
+            closeQuietly(response.bodyStream());
             byte[] body = (head || noContent || response.body() == null) ? new byte[0] : response.body();
             FullHttpResponse nettyResponse = new DefaultFullHttpResponse(
                     HttpVersion.HTTP_1_1,
@@ -69,12 +91,33 @@ final class ProxyResponseWriter {
             if (!head && !noContent) {
                 HttpUtil.setContentLength(nettyResponse, body.length);
             }
-            if (keepAlive && ctx.channel().isOpen()) {
-                HttpUtil.setKeepAlive(nettyResponse, true);
-                ctx.writeAndFlush(nettyResponse);
-            } else {
-                HttpUtil.setKeepAlive(nettyResponse, false);
-                ctx.writeAndFlush(nettyResponse).addListener(ChannelFutureListener.CLOSE);
+            boolean keepOpen = keepAlive && ctx.channel().isOpen();
+            HttpUtil.setKeepAlive(nettyResponse, keepOpen);
+            runOnEventLoop(ctx, () -> {
+                if (beforeFinalFlush != null) {
+                    beforeFinalFlush.run();
+                }
+                ChannelFuture future = ctx.writeAndFlush(nettyResponse);
+                if (!keepOpen) {
+                    future.addListener(ChannelFutureListener.CLOSE);
+                }
+            });
+        }
+    }
+
+    private static void runOnEventLoop(ChannelHandlerContext ctx, Runnable task) {
+        if (ctx.executor().inEventLoop()) {
+            task.run();
+        } else {
+            ctx.executor().execute(task);
+        }
+    }
+
+    private static void closeQuietly(InputStream stream) {
+        if (stream != null) {
+            try {
+                stream.close();
+            } catch (IOException ignored) {
             }
         }
     }

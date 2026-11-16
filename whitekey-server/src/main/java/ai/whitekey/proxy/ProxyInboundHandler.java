@@ -458,9 +458,10 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
             ProxyResponse response,
             boolean keepAlive) {
         try {
-            ProxyResponseWriter.write(ctx, requestMethod, response, keepAlive);
-        } finally {
+            ProxyResponseWriter.write(ctx, requestMethod, response, keepAlive, () -> cleanup(ctx));
+        } catch (Throwable error) {
             ctx.executor().execute(() -> cleanup(ctx));
+            throw error;
         }
     }
 }
