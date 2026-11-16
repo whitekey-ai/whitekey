@@ -69,9 +69,9 @@ public class CredentialService {
         HttpCredentialTargetType targetType = HttpCredentialTargetType.valueOf(rawType.toUpperCase(Locale.ROOT));
         String targetKey = firstNonBlank(request.targetKey(), preset != null ? preset.targetKey() : null, HttpHeaders.AUTHORIZATION);
         String formatTemplate = firstNonBlank(request.formatTemplate(), preset != null ? preset.formatTemplate() : null, "%s");
-        String rawSecret = request.secret().trim();
+        String name = requireNonBlank(request.name(), "Credential name is required");
+        String rawSecret = requireNonBlank(request.secret(), "Credential secret is required");
         String encrypted = encryptionService.encrypt(rawSecret);
-        String name = request.name().trim();
 
         HttpCredentialEntity entity = repository.findByName(name)
                 .map(existing -> {
@@ -90,6 +90,13 @@ public class CredentialService {
         HttpCredentialEntity saved = httpCredentialRepository.save(entity);
         invalidateCache();
         return toDto(saved, rawSecret);
+    }
+
+    private static String requireNonBlank(String value, String message) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(message);
+        }
+        return value.trim();
     }
 
     private static String firstNonBlank(String primary, String fallback, String defaultValue) {

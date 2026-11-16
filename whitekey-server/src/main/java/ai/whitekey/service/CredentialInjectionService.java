@@ -5,8 +5,10 @@ import ai.whitekey.entity.HttpCredentialTargetType;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.UriComponentsBuilder;
+import org.springframework.web.util.UriUtils;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
 
@@ -96,10 +98,10 @@ public class CredentialInjectionService {
         if (template == null || template.isBlank()) {
             return secret;
         }
-        if (template.contains(PERCENT_S_PLACEHOLDER)) {
-            return String.format(template, secret);
-        }
-        return template.replace(TOKEN_PLACEHOLDER, secret).replace(SECRET_PLACEHOLDER, secret);
+        return template
+                .replace(PERCENT_S_PLACEHOLDER, secret)
+                .replace(TOKEN_PLACEHOLDER, secret)
+                .replace(SECRET_PLACEHOLDER, secret);
     }
 
     private void injectCookie(HttpHeaders headers, String cookieName, String value) {
@@ -113,8 +115,10 @@ public class CredentialInjectionService {
     }
 
     private URI injectQueryParam(URI uri, String key, String value) {
+        String encodedKey = UriUtils.encodeQueryParam(key, StandardCharsets.UTF_8);
+        String encodedValue = UriUtils.encodeQueryParam(value, StandardCharsets.UTF_8);
         return UriComponentsBuilder.fromUri(uri)
-                .queryParam(key, value)
+                .replaceQueryParam(encodedKey, encodedValue)
                 .build(true)
                 .toUri();
     }
