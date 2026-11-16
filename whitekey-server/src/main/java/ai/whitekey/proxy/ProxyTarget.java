@@ -52,8 +52,23 @@ public record ProxyTarget(
         int slashIndex = rest.indexOf('/');
         String authority = slashIndex >= 0 ? rest.substring(0, slashIndex) : rest;
         String targetPath = slashIndex >= 0 ? rest.substring(slashIndex) : "/";
-        int defaultPort = ProtocolConstants.HTTPS.equalsIgnoreCase(scheme) ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT;
-        return parseAuthority(authority, scheme, targetPath, rawQuery, defaultPort, false);
+        return parseAuthority(authority, scheme, targetPath, rawQuery, defaultPort(scheme), false);
+    }
+
+    public static ProxyTarget fromUri(URI url) {
+        if (url == null) {
+            return new ProxyTarget(ProtocolConstants.HTTP, "", DEFAULT_HTTP_PORT, false, "/", null);
+        }
+        String scheme = url.getScheme() != null ? url.getScheme().toLowerCase(Locale.ROOT) : ProtocolConstants.HTTP;
+        String host = url.getHost() != null ? url.getHost().toLowerCase(Locale.ROOT) : "";
+        int port = url.getPort() != -1 ? url.getPort() : defaultPort(scheme);
+        String rawPath = url.getRawPath();
+        String path = (rawPath != null && !rawPath.isEmpty()) ? rawPath : "/";
+        return new ProxyTarget(scheme, host, port, url.getPort() != -1, path, url.getRawQuery());
+    }
+
+    private static int defaultPort(String scheme) {
+        return ProtocolConstants.HTTPS.equalsIgnoreCase(scheme) ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT;
     }
 
     /**

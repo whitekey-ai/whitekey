@@ -1,6 +1,5 @@
 package ai.whitekey.policy;
 
-import ai.whitekey.api.dto.ProtocolConstants;
 import ai.whitekey.entity.HttpActionEntity;
 import ai.whitekey.entity.HttpRuleEntity;
 import ai.whitekey.entity.RuleEffect;
@@ -15,7 +14,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Predicate;
@@ -166,15 +164,9 @@ public final class PolicyDecisionEngine {
         if (method == null || url == null || url.getHost() == null) {
             return false;
         }
-        String host = url.getHost().toLowerCase(Locale.ROOT);
-        int port = url.getPort() != -1
-                ? url.getPort()
-                : (ProtocolConstants.HTTPS.equalsIgnoreCase(url.getScheme()) ? ProxyTarget.DEFAULT_HTTPS_PORT : ProxyTarget.DEFAULT_HTTP_PORT);
-        String rawPath = url.getRawPath();
-        String path = (rawPath == null || rawPath.isEmpty()) ? "/" : rawPath;
-
-        Map<String, List<String>> queryParams = HttpPolicyValidator.parseQueryParams(url.getRawQuery());
-        return matchesRequestMetadata(method, host, port, path, queryParams, requestHeaders, rule);
+        ProxyTarget target = ProxyTarget.fromUri(url);
+        Map<String, List<String>> queryParams = HttpPolicyValidator.parseQueryParams(target.rawQuery());
+        return matchesRequestMetadata(method, target.host(), target.port(), target.path(), queryParams, requestHeaders, rule);
     }
 
     public boolean matchesHttp(HttpActionEntity action, HttpRuleEntity rule) {

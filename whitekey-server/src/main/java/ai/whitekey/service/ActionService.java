@@ -20,7 +20,6 @@ import org.springframework.util.unit.DataSize;
 
 import java.net.URI;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -57,19 +56,8 @@ public class ActionService {
             HttpHeaders headers,
             byte[] body,
             ActionStatus status) {
-        int port = (url != null && url.getPort() != -1)
-                ? url.getPort()
-                : (url != null && ProtocolConstants.HTTPS.equalsIgnoreCase(url.getScheme())
-                        ? ProxyTarget.DEFAULT_HTTPS_PORT
-                        : ProxyTarget.DEFAULT_HTTP_PORT);
-        String host = (url != null && url.getHost() != null)
-                ? url.getHost().toLowerCase(Locale.ROOT)
-                : "";
-        String rawPath = (url != null) ? url.getRawPath() : null;
-        String path = (rawPath != null && !rawPath.isEmpty()) ? rawPath : "/";
-        Map<String, List<String>> queryParams = (url != null)
-                ? HttpPolicyValidator.parseQueryParams(url.getRawQuery())
-                : Collections.emptyMap();
+        ProxyTarget target = ProxyTarget.fromUri(url);
+        Map<String, List<String>> queryParams = HttpPolicyValidator.parseQueryParams(target.rawQuery());
         HttpHeaders safeHeaders = headers != null ? HttpHeaders.readOnlyHttpHeaders(headers) : HttpHeaders.EMPTY;
         byte[] safeBody = body != null ? body : new byte[0];
         if (safeBody.length > maxStoredBodyBytes) {
@@ -79,9 +67,9 @@ public class ActionService {
         HttpActionEntity entity = new HttpActionEntity(
                 method,
                 url != null ? url.toString() : "",
-                host,
-                port,
-                path,
+                target.host(),
+                target.port(),
+                target.path(),
                 queryParams,
                 safeHeaders,
                 safeBody,
