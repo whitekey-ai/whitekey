@@ -10,6 +10,7 @@ services:
       PROXY_ENABLED: ${PROXY_ENABLED:-true}
       PROXY_PORT: ${PROXY_PORT:-9999}
       PROXY_ADDRESS: ${PROXY_ADDRESS:-0.0.0.0}
+      DEFAULT_POLICY: ${DEFAULT_POLICY:-DENY}
     ports:
       - "${PROXY_HOST_BIND:-127.0.0.1}:${PROXY_PORT:-9999}:${PROXY_PORT:-9999}"
     volumes:

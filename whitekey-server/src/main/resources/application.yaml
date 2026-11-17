@@ -36,3 +36,5 @@ app:
     enabled: ${PROXY_ENABLED:true}
     port: ${PROXY_PORT:9999}
     address: ${PROXY_ADDRESS:${server.address}}
+  policy:
+    default-effect: ${DEFAULT_POLICY:DENY}

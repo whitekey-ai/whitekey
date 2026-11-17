@@ -1,10 +1,12 @@
 package ai.whitekey.policy;
 
+import ai.whitekey.config.PolicyProperties;
 import ai.whitekey.entity.HttpActionEntity;
 import ai.whitekey.entity.HttpRuleEntity;
 import ai.whitekey.entity.RuleEffect;
 import ai.whitekey.proxy.ProxyTarget;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Component;
@@ -21,22 +23,35 @@ import java.util.function.Predicate;
 @Component
 public final class PolicyDecisionEngine {
     public static final String NO_MATCHING_RULE_REASON = "No applicable rule allows this action";
+    public static final String NO_MATCHING_RULE_ALLOW_REASON = "No matching rule; allowed by default policy";
+    public static final String NO_MATCHING_RULE_APPROVAL_REASON = "No matching rule; requires human approval by default policy";
     public static final String RULE_DENIED_REASON = "A matching rule explicitly denies this action";
     public static final String RULE_REQUIRES_APPROVAL_REASON = "A matching rule requires human approval";
     public static final String RULE_ALLOWED_REASON = "Matching rules allow this action";
     public static final String INVALID_BODY_REASON = "Request body is not valid JSON or contains duplicate keys";
 
     private final CelBodyEvaluator bodyEvaluator;
+    private final RuleEffect defaultEffect;
 
     public PolicyDecisionEngine(CelBodyEvaluator bodyEvaluator) {
+        this(bodyEvaluator, new PolicyProperties(RuleEffect.DENY.name()));
+    }
+
+    @Autowired
+    public PolicyDecisionEngine(CelBodyEvaluator bodyEvaluator, PolicyProperties policyProperties) {
         this.bodyEvaluator = bodyEvaluator;
+        this.defaultEffect = policyProperties != null ? policyProperties.resolvedDefaultEffect() : RuleEffect.DENY;
     }
 
     public record MatchedRule(UUID ruleId, RuleEffect effect) {}
 
-    public record Decision(RuleEffect effect, String reason, List<MatchedRule> matchedRules) {
+    public record Decision(RuleEffect effect, String reason, List<MatchedRule> matchedRules, boolean unmatched) {
+        public Decision(RuleEffect effect, String reason, List<MatchedRule> matchedRules) {
+            this(effect, reason, matchedRules, false);
+        }
+
         public boolean isUnmatchedAction() {
-            return matchedRules.isEmpty() && reason.equals(NO_MATCHING_RULE_REASON);
+            return unmatched;
         }
     }
 
@@ -141,7 +156,15 @@ public final class PolicyDecisionEngine {
         if (!matched.isEmpty()) {
             return new Decision(RuleEffect.ALLOW, RULE_ALLOWED_REASON, immutable);
         }
-        return new Decision(RuleEffect.DENY, NO_MATCHING_RULE_REASON, immutable);
+        return new Decision(defaultEffect, unmatchedReason(defaultEffect), immutable, true);
+    }
+
+    private static String unmatchedReason(RuleEffect effect) {
+        return switch (effect) {
+            case ALLOW -> NO_MATCHING_RULE_ALLOW_REASON;
+            case REQUIRE_APPROVAL -> NO_MATCHING_RULE_APPROVAL_REASON;
+            case DENY -> NO_MATCHING_RULE_REASON;
+        };
     }
 
     public boolean matchesBody(HttpRuleEntity rule, byte[] bodyBytes) {

@@ -32,7 +32,9 @@ public class HttpApprovalHandler implements ProtocolApprovalHandler<HttpActionEn
     @Override
     public void validateApproval(HttpActionEntity http, boolean saveRule) {
         var current = engine.evaluateHttp(http, rules.getHttpRules());
-        if (current.isUnmatchedAction() && !setupService.isSetupMode()) {
+        if (current.isUnmatchedAction()
+                && current.effect() != RuleEffect.REQUIRE_APPROVAL
+                && !setupService.isSetupMode()) {
             throw new ApprovalConflictException("Setup mode has ended");
         }
         if (saveRule
