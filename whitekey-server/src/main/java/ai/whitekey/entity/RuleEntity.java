@@ -1,5 +1,6 @@
 package ai.whitekey.entity;
 
+import ai.whitekey.api.dto.RuleEffect;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;

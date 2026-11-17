@@ -171,7 +171,7 @@ public class ActionService {
         }
         return switch (decision.trim().toUpperCase(Locale.ROOT)) {
             case "ALLOW", "APPROVED", "ALLOWED" -> ActionStatus.ALLOWED;
-            case "BLOCK", "DENIED", "REJECTED" -> ActionStatus.DENIED;
+            case "DENY", "DENIED", "REJECTED" -> ActionStatus.DENIED;
             default -> throw new IllegalArgumentException("Invalid approval decision: " + decision);
         };
     }

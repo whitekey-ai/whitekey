@@ -1,6 +1,6 @@
 package ai.whitekey.proxy;
 
-import ai.whitekey.entity.RuleEffect;
+import ai.whitekey.api.dto.RuleEffect;
 import ai.whitekey.proxy.AgentProxyService.ProxyResponse;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
@@ -147,7 +147,7 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
 
         boolean spoolBody = preparedRequest.needsBody()
                 || (preparedRequest.evaluationResult() != null
-                        && preparedRequest.evaluationResult().effect() == RuleEffect.REQUIRE_APPROVAL);
+                        && preparedRequest.evaluationResult().effect() == RuleEffect.ASK);
         if (spoolBody) {
             startSpooling(ctx);
         } else {

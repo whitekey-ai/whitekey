@@ -1,6 +1,6 @@
 package ai.whitekey.config;
 
-import ai.whitekey.entity.RuleEffect;
+import ai.whitekey.api.dto.RuleEffect;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "app.policy")

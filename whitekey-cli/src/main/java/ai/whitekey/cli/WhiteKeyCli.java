@@ -10,6 +10,7 @@ public class WhiteKeyCli {
     public static void main(String[] args) {
         File configFile = CliConfigDefaults.resolveConfigFile();
         CommandLine cmd = new CommandLine(new WhiteKeyRootCommand());
+        cmd.setCaseInsensitiveEnumValuesAllowed(true);
         cmd.setDefaultValueProvider(new CascadingDefaultProvider(configFile));
         int exitCode = cmd
                 .setExecutionExceptionHandler((ex, command, parseResult) -> {

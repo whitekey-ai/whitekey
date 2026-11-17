@@ -2,6 +2,7 @@ package ai.whitekey.cli;
 
 import ai.whitekey.api.dto.Action;
 import ai.whitekey.api.dto.HttpAction;
+import ai.whitekey.api.dto.RuleEffect;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -18,13 +19,11 @@ import java.util.List;
         })
 public class ApprovalCommand extends BaseCommand {
 
-    public static final String DECISION_ALLOW = "ALLOW";
-    public static final String DECISION_BLOCK = "BLOCK";
     public static final String LABEL_APPROVED = "APPROVED";
     public static final String LABEL_REJECTED = "REJECTED";
 
     static String formatResolution(String actionId, String decision, boolean saveRule) {
-        String label = DECISION_ALLOW.equalsIgnoreCase(decision) ? LABEL_APPROVED : LABEL_REJECTED;
+        String label = RuleEffect.ALLOW.name().equalsIgnoreCase(decision) ? LABEL_APPROVED : LABEL_REJECTED;
         return "Action " + actionId + " " + label + "." + (saveRule ? " (Rule saved)" : "");
     }
 
@@ -75,7 +74,7 @@ public class ApprovalCommand extends BaseCommand {
 
         @Override
         public void run() {
-            resolve(actionId, DECISION_ALLOW, saveRule);
+            resolve(actionId, RuleEffect.ALLOW.name(), saveRule);
         }
     }
 
@@ -87,7 +86,7 @@ public class ApprovalCommand extends BaseCommand {
 
         @Override
         public void run() {
-            resolve(actionId, DECISION_BLOCK, false);
+            resolve(actionId, RuleEffect.DENY.name(), false);
         }
     }
 }

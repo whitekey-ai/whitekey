@@ -1,6 +1,6 @@
 # WhiteKey
 
-Egress policy engine, control plane, and credential broker for AI agents. WhiteKey enforces egress rules with a configurable default policy (`DENY`, `ALLOW`, or `REQUIRE_APPROVAL`), supports interactive human approval, and injects encrypted credentials on outbound requests so agents never see raw secrets.
+Egress policy engine, control plane, and credential broker for AI agents. WhiteKey enforces egress rules with a configurable default policy (`DENY`, `ALLOW`, or `ASK`), supports interactive human approval, and injects encrypted credentials on outbound requests so agents never see raw secrets.
 
 ---
 
@@ -53,7 +53,7 @@ Set via environment variables or `.env`:
 | `PROXY_PORT` | `9999` | `9999` | Agent proxy port |
 | `PROXY_ADDRESS` | `127.0.0.1` | `0.0.0.0` | Agent proxy bind address |
 | `PROXY_HOST_BIND` | — | `127.0.0.1` | Host IP for Docker Compose port mapping |
-| `DEFAULT_POLICY` | `DENY` | `DENY` | Fallback policy for unmatched requests (`DENY`, `ALLOW`, or `REQUIRE_APPROVAL`) |
+| `DEFAULT_POLICY` | `DENY` | `DENY` | Fallback policy for unmatched requests (`DENY`, `ALLOW`, or `ASK`) |
 | `WHITEKEY_DATA_DIR` | `~/.local/share/whitekey` | `/root/.local/share/whitekey` | SQLite DB, token, and key directory |
 | `WHITEKEY_ADMIN_TOKEN` | auto-generated | auto-generated | Override admin bearer token |
 
@@ -131,7 +131,7 @@ whitekey credentials remove github-pat
 
 ### Policy Rules
 
-Policy precedence: `DENY` (`BLOCK`) > `REQUIRE_APPROVAL` (`ASK`) > `ALLOW`. Unmatched requests follow `DEFAULT_POLICY` (`DENY` by default).
+Policy precedence: `DENY` > `ASK` > `ALLOW`. Unmatched requests follow `DEFAULT_POLICY` (`DENY` by default).
 
 ```bash
 whitekey rules list
@@ -142,7 +142,7 @@ whitekey rules add --name allow_github --effect ALLOW --hosts api.github.com
 # Restrict methods, paths, query params, headers, or JSON body (CEL expression)
 whitekey rules add --name limit_stripe --effect ALLOW --methods POST --hosts api.stripe.com --paths /v1/charges --condition "amount <= 5000 && currency == 'usd'"
 whitekey rules add --name ask_delete --effect ASK --methods DELETE --hosts api.github.com --paths "/*"
-whitekey rules add --name block_admin --effect BLOCK --hosts api.example.com --paths "/admin/*"
+whitekey rules add --name deny_admin --effect DENY --hosts api.example.com --paths "/admin/*"
 
 whitekey rules remove allow_github
 ```

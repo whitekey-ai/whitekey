@@ -1,11 +1,14 @@
-package ai.whitekey.entity;
+package ai.whitekey.api.dto;
 
 import java.util.Locale;
 
+/**
+ * Policy decision and rule effect shared across API contracts, server, and CLI.
+ */
 public enum RuleEffect {
     ALLOW,
     DENY,
-    REQUIRE_APPROVAL;
+    ASK;
 
     public static final String ERROR_EFFECT_REQUIRED = "Rule effect is required";
 
@@ -15,9 +18,10 @@ public enum RuleEffect {
         }
         return switch (effect.trim().toUpperCase(Locale.ROOT)) {
             case "ALLOW" -> ALLOW;
-            case "BLOCK", "DENY" -> DENY;
-            case "ASK", "REQUIRE_APPROVAL" -> REQUIRE_APPROVAL;
-            default -> RuleEffect.valueOf(effect.trim().toUpperCase(Locale.ROOT));
+            case "DENY" -> DENY;
+            case "ASK" -> ASK;
+            default -> throw new IllegalArgumentException(
+                    "Invalid rule effect: " + effect + " (expected ALLOW, DENY, or ASK)");
         };
     }
 }

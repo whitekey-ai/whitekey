@@ -2,6 +2,7 @@ package ai.whitekey.cli;
 
 import ai.whitekey.api.dto.Action;
 import ai.whitekey.api.dto.HttpAction;
+import ai.whitekey.api.dto.RuleEffect;
 import ai.whitekey.cli.client.ApiClient;
 import ai.whitekey.cli.client.CliException;
 import org.jline.terminal.Attributes;
@@ -23,15 +24,15 @@ import java.util.Objects;
 final class ApprovalWatcher {
 
     enum Choice {
-        APPROVE("Approve", ApprovalCommand.DECISION_ALLOW, false),
-        APPROVE_AND_SAVE("Approve and save as rule", ApprovalCommand.DECISION_ALLOW, true),
-        REJECT("Reject", ApprovalCommand.DECISION_BLOCK, false);
+        APPROVE("Approve", RuleEffect.ALLOW, false),
+        APPROVE_AND_SAVE("Approve and save as rule", RuleEffect.ALLOW, true),
+        REJECT("Reject", RuleEffect.DENY, false);
 
         final String label;
-        final String decision;
+        final RuleEffect decision;
         final boolean saveRule;
 
-        Choice(String label, String decision, boolean saveRule) {
+        Choice(String label, RuleEffect decision, boolean saveRule) {
             this.label = label;
             this.decision = decision;
             this.saveRule = saveRule;
@@ -124,7 +125,7 @@ final class ApprovalWatcher {
 
             Choice choice = result.choice();
             try {
-                apiClient.resolveApproval(current.id(), choice.decision, choice.saveRule);
+                apiClient.resolveApproval(current.id(), choice.decision.name(), choice.saveRule);
             } catch (CliException ex) {
                 if (!isNoLongerPendingError(ex.getMessage())) {
                     throw ex;

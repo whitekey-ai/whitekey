@@ -1,7 +1,7 @@
 package ai.whitekey.service;
 
+import ai.whitekey.api.dto.RuleEffect;
 import ai.whitekey.entity.HttpActionEntity;
-import ai.whitekey.entity.RuleEffect;
 import ai.whitekey.exception.ApprovalConflictException;
 import ai.whitekey.policy.PolicyDecisionEngine;
 import ai.whitekey.proxy.ProxyTarget;
@@ -33,7 +33,7 @@ public class HttpApprovalHandler implements ProtocolApprovalHandler<HttpActionEn
     public void validateApproval(HttpActionEntity http, boolean saveRule) {
         var current = engine.evaluateHttp(http, rules.getHttpRules());
         if (current.isUnmatchedAction()
-                && current.effect() != RuleEffect.REQUIRE_APPROVAL
+                && current.effect() != RuleEffect.ASK
                 && !setupService.isSetupMode()) {
             throw new ApprovalConflictException("Setup mode has ended");
         }

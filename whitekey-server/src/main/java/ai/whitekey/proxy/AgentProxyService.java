@@ -1,8 +1,8 @@
 package ai.whitekey.proxy;
 
+import ai.whitekey.api.dto.RuleEffect;
 import ai.whitekey.entity.ActionEntity;
 import ai.whitekey.entity.ActionStatus;
-import ai.whitekey.entity.RuleEffect;
 import ai.whitekey.policy.HttpPolicyValidator;
 import ai.whitekey.service.ActionService;
 import ai.whitekey.service.ApprovalWaitRegistry;
@@ -179,7 +179,7 @@ public class AgentProxyService {
             EvaluationResult result,
             CompletableFuture<Void> clientDisconnected) {
         UUID actionId = result.action().getId();
-        if (result.effect() == RuleEffect.REQUIRE_APPROVAL) {
+        if (result.effect() == RuleEffect.ASK) {
             ProxyResponse waitError = awaitApproval(actionId, clientDisconnected);
             if (waitError != null) {
                 return waitError;

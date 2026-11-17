@@ -1,6 +1,7 @@
 package ai.whitekey.entity;
 
 import ai.whitekey.api.dto.ProtocolConstants;
+import ai.whitekey.api.dto.RuleEffect;
 import ai.whitekey.converter.HttpHeadersConverter;
 import ai.whitekey.converter.HttpMethodListConverter;
 

@@ -1,9 +1,9 @@
 package ai.whitekey.policy;
 
+import ai.whitekey.api.dto.RuleEffect;
 import ai.whitekey.config.PolicyProperties;
 import ai.whitekey.entity.HttpActionEntity;
 import ai.whitekey.entity.HttpRuleEntity;
-import ai.whitekey.entity.RuleEffect;
 import ai.whitekey.proxy.ProxyTarget;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -147,9 +147,9 @@ public final class PolicyDecisionEngine {
             return new Decision(
                     RuleEffect.DENY, RULE_DENIED_REASON, immutable);
         }
-        if (matched.stream().anyMatch(rule -> rule.effect() == RuleEffect.REQUIRE_APPROVAL)) {
+        if (matched.stream().anyMatch(rule -> rule.effect() == RuleEffect.ASK)) {
             return new Decision(
-                    RuleEffect.REQUIRE_APPROVAL,
+                    RuleEffect.ASK,
                     RULE_REQUIRES_APPROVAL_REASON,
                     immutable);
         }
@@ -162,7 +162,7 @@ public final class PolicyDecisionEngine {
     private static String unmatchedReason(RuleEffect effect) {
         return switch (effect) {
             case ALLOW -> NO_MATCHING_RULE_ALLOW_REASON;
-            case REQUIRE_APPROVAL -> NO_MATCHING_RULE_APPROVAL_REASON;
+            case ASK -> NO_MATCHING_RULE_APPROVAL_REASON;
             case DENY -> NO_MATCHING_RULE_REASON;
         };
     }

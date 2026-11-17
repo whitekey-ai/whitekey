@@ -1,9 +1,9 @@
 package ai.whitekey.service;
 
+import ai.whitekey.api.dto.RuleEffect;
 import ai.whitekey.entity.ActionStatus;
 import ai.whitekey.entity.HttpActionEntity;
 import ai.whitekey.entity.HttpRuleEntity;
-import ai.whitekey.entity.RuleEffect;
 import ai.whitekey.policy.PolicyDecisionEngine;
 import ai.whitekey.policy.PolicyDecisionEngine.Decision;
 
@@ -76,12 +76,12 @@ public class PolicyEvaluationService {
             byte[] bodyBytes,
             Decision decision) {
         boolean setup = setupService.isSetupMode() && decision.isUnmatchedAction();
-        RuleEffect effect = setup ? RuleEffect.REQUIRE_APPROVAL : decision.effect();
+        RuleEffect effect = setup ? RuleEffect.ASK : decision.effect();
         String reason = setup ? SETUP_APPROVAL_REASON : decision.reason();
         ActionStatus status = switch (effect) {
             case ALLOW -> ActionStatus.ALLOWED;
             case DENY -> ActionStatus.DENIED;
-            case REQUIRE_APPROVAL -> ActionStatus.AWAITING_APPROVAL;
+            case ASK -> ActionStatus.AWAITING_APPROVAL;
         };
         HttpActionEntity action = actions.recordHttp(method, url, headers, bodyBytes, status);
         return new EvaluationResult(effect, reason, action);

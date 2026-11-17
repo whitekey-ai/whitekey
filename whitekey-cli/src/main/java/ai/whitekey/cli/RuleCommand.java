@@ -4,6 +4,8 @@ import ai.whitekey.api.dto.CreateHttpRuleRequest;
 import ai.whitekey.api.dto.HttpRule;
 import ai.whitekey.api.dto.ProtocolConstants;
 import ai.whitekey.api.dto.Rule;
+import ai.whitekey.api.dto.RuleEffect;
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -62,8 +64,12 @@ public class RuleCommand extends BaseCommand {
         @Option(names = "--name", required = true, description = "Unique rule name (e.g. allow_github)")
         private String name;
 
-        @Option(names = "--effect", required = true, description = "Rule effect: ALLOW, BLOCK, or ASK")
-        private String effect;
+        @Option(
+                names = "--effect",
+                required = true,
+                converter = EffectConverter.class,
+                description = "Rule effect: ${COMPLETION-CANDIDATES}")
+        private RuleEffect effect;
 
         @Option(names = "--methods", split = ",", description = "Comma-separated HTTP methods (e.g. GET,POST)")
         private List<String> methods = List.of();
@@ -91,7 +97,7 @@ public class RuleCommand extends BaseCommand {
             CreateHttpRuleRequest payload = new CreateHttpRuleRequest(
                     name,
                     ProtocolConstants.HTTP,
-                    effect.toUpperCase(),
+                    effect.name(),
                     methods,
                     hosts,
                     ports,
@@ -119,6 +125,13 @@ public class RuleCommand extends BaseCommand {
                 }
             }
             return map;
+        }
+    }
+
+    private static final class EffectConverter implements CommandLine.ITypeConverter<RuleEffect> {
+        @Override
+        public RuleEffect convert(String value) {
+            return RuleEffect.fromString(value);
         }
     }
 
