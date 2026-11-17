@@ -8,6 +8,7 @@ spring:
       maximum-pool-size: 1
   config:
     import:
+      - optional:file:.env[.properties]
       - optional:file:../.env[.properties]
       - optional:classpath:credential-presets.yaml
   jpa:

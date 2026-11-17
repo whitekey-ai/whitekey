@@ -1,10 +1,17 @@
 services:
   whitekey:
+    image: whitekey-ai/whitekey:latest
     build: .
     container_name: ${WHITEKEY_CONTAINER_NAME:-whitekey}
     restart: unless-stopped
+    environment:
+      PORT: ${PORT:-1111}
+      BIND_ADDRESS: ${BIND_ADDRESS:-127.0.0.1}
+      PROXY_ENABLED: ${PROXY_ENABLED:-true}
+      PROXY_PORT: ${PROXY_PORT:-9999}
+      PROXY_ADDRESS: ${PROXY_ADDRESS:-0.0.0.0}
     ports:
-      - "127.0.0.1:9999:9999"
+      - "${PROXY_HOST_BIND:-127.0.0.1}:${PROXY_PORT:-9999}:${PROXY_PORT:-9999}"
     volumes:
       - ${WHITEKEY_HOST_DATA_DIR:-~/.local/share/whitekey}:/root/.local/share/whitekey
     networks:

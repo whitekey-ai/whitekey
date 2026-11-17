@@ -2,12 +2,13 @@ package ai.whitekey.cli;
 
 import ai.whitekey.cli.client.ApiClient;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.IVersionProvider;
 import picocli.CommandLine.Option;
 
 @Command(
         name = "whitekey",
         description = "WhiteKey - Egress Policy Engine, Control Plane & Credential Broker for AI Agents",
-        version = "0.0.1",
+        versionProvider = WhiteKeyRootCommand.ManifestVersionProvider.class,
         subcommands = {
                 StatusCommand.class,
                 SetupCommand.class,
@@ -35,5 +36,13 @@ public class WhiteKeyRootCommand extends BaseCommand {
             apiClient = new ApiClient(serverUrl, adminToken);
         }
         return apiClient;
+    }
+
+    static class ManifestVersionProvider implements IVersionProvider {
+        @Override
+        public String[] getVersion() {
+            String version = WhiteKeyRootCommand.class.getPackage().getImplementationVersion();
+            return new String[]{version != null ? version : "dev"};
+        }
     }
 }

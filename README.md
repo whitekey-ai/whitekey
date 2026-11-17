@@ -9,8 +9,10 @@ Egress policy engine, control plane, and credential broker for AI agents. WhiteK
 ### Option 1: Docker Compose (Recommended for Sandbox Isolation)
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
+
+*(Pass `--build` to build locally from source instead of pulling `whitekey-ai/whitekey:latest`.)*
 
 - Proxy listens on `127.0.0.1:9999` on the host and `whitekey:9999` inside the isolated `whitekey-sandbox` network.
 - Admin API binds to `127.0.0.1:1111` inside the container; run CLI commands via:
@@ -38,6 +40,21 @@ Default endpoints and paths:
 - **Agent Proxy:** `http://127.0.0.1:9999` (`PROXY_ADDRESS`, `PROXY_PORT`, `PROXY_ENABLED`)
 - **Admin API:** `http://127.0.0.1:1111` (`BIND_ADDRESS`, `PORT`)
 - **Data Directory:** `~/.local/share/whitekey` (`WHITEKEY_DATA_DIR`)
+
+## Configuration
+
+Set via environment variables or `.env`:
+
+| Variable | Default (Local) | Default (Docker) | Description |
+| :--- | :--- | :--- | :--- |
+| `PORT` | `1111` | `1111` | Admin API port |
+| `BIND_ADDRESS` | `127.0.0.1` | `127.0.0.1` | Admin API bind address |
+| `PROXY_ENABLED` | `true` | `true` | Enable or disable the proxy server |
+| `PROXY_PORT` | `9999` | `9999` | Agent proxy port |
+| `PROXY_ADDRESS` | `127.0.0.1` | `0.0.0.0` | Agent proxy bind address |
+| `PROXY_HOST_BIND` | — | `127.0.0.1` | Host IP for Docker Compose port mapping |
+| `WHITEKEY_DATA_DIR` | `~/.local/share/whitekey` | `/root/.local/share/whitekey` | SQLite DB, token, and key directory |
+| `WHITEKEY_ADMIN_TOKEN` | auto-generated | auto-generated | Override admin bearer token |
 
 ---
 

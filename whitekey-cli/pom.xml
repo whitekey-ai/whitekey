@@ -46,6 +46,7 @@
 					<archive>
 						<manifest>
 							<mainClass>ai.whitekey.cli.WhiteKeyCli</mainClass>
+							<addDefaultImplementationEntries>true</addDefaultImplementationEntries>
 						</manifest>
 					</archive>
 					<descriptorRefs>
