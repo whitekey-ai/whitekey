@@ -33,9 +33,8 @@ public class ApiClient {
     private static final String APPLICATION_JSON = "application/json";
     private static final String BEARER_PREFIX = "Bearer ";
 
-    public static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(3);
-    public static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
-    public static final int MAX_ACTIONS_LIMIT = 100;
+    public static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(3);
+    public static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(10);
 
     public static final String PATH_STATUS = "/status";
     public static final String PATH_SETUP = "/setup";
@@ -48,13 +47,18 @@ public class ApiClient {
 
     private final String serverUrl;
     private final String adminToken;
+    private final Duration requestTimeout;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
     public ApiClient(String serverUrl, String adminToken) {
         this.serverUrl = CliConfigDefaults.resolveServerUrl(serverUrl);
         this.adminToken = CliConfigDefaults.resolveAdminToken(adminToken);
-        this.httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
+        Duration connectTimeout = CliConfigDefaults.resolveDuration(
+                CliConfigDefaults.ENV_CONNECT_TIMEOUT, DEFAULT_CONNECT_TIMEOUT);
+        this.requestTimeout = CliConfigDefaults.resolveDuration(
+                CliConfigDefaults.ENV_REQUEST_TIMEOUT, DEFAULT_REQUEST_TIMEOUT);
+        this.httpClient = HttpClient.newBuilder().connectTimeout(connectTimeout).build();
         this.objectMapper = new ObjectMapper().registerModule(new JavaTimeModule()).configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
@@ -108,7 +112,7 @@ public class ApiClient {
     }
 
     public List<Action> getPendingApprovals() {
-        return getHistory(MAX_ACTIONS_LIMIT, "AWAITING_APPROVAL", null, null).stream()
+        return getHistory(Integer.MAX_VALUE, "AWAITING_APPROVAL", null, null).stream()
                 .sorted(Comparator.comparing(Action::id, Comparator.nullsLast(String::compareTo)))
                 .toList();
     }
@@ -118,7 +122,7 @@ public class ApiClient {
     }
 
     public List<Action> getHistory(int limit, String status, String method, String host) {
-        int validLimit = Math.max(1, Math.min(limit, MAX_ACTIONS_LIMIT));
+        int validLimit = Math.max(1, limit);
         StringBuilder path = new StringBuilder(PATH_ACTIONS + "?page=0&limit=").append(validLimit);
         appendQueryParam(path, "status", status != null ? status.toUpperCase() : null);
         appendQueryParam(path, "method", method != null ? method.toUpperCase() : null);
@@ -163,7 +167,7 @@ public class ApiClient {
         String fullUrl = serverUrl + path;
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(fullUrl))
-                .timeout(REQUEST_TIMEOUT);
+                .timeout(requestTimeout);
         if (adminToken != null && !adminToken.isBlank()) {
             builder.header(HEADER_AUTHORIZATION, BEARER_PREFIX + adminToken.strip());
         }

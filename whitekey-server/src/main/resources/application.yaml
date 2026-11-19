@@ -36,5 +36,13 @@ app:
     enabled: ${PROXY_ENABLED:true}
     port: ${PROXY_PORT:9999}
     address: ${PROXY_ADDRESS:${server.address}}
+    connect-timeout: ${PROXY_CONNECT_TIMEOUT:15s}
+    approval-poll-interval: ${PROXY_APPROVAL_POLL_INTERVAL:2s}
+    shutdown-timeout: ${PROXY_SHUTDOWN_TIMEOUT:2s}
+    stream-buffer-size: ${PROXY_STREAM_BUFFER_SIZE:64KB}
+    max-initial-line-length: ${PROXY_MAX_INITIAL_LINE_LENGTH:8KB}
+    max-header-size: ${PROXY_MAX_HEADER_SIZE:32KB}
+    max-chunk-size: ${PROXY_MAX_CHUNK_SIZE:16KB}
   policy:
     default-effect: ${DEFAULT_POLICY:DENY}
+    cel-cache-size: ${POLICY_CEL_CACHE_SIZE:1000}

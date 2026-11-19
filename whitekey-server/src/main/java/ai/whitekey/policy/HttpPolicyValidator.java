@@ -84,7 +84,7 @@ public final class HttpPolicyValidator {
         if (input == null || input.isEmpty()) {
             throw new IllegalArgumentException("At least one host is required");
         }
-        List<String> hosts = values(input).stream().map(this::host).toList();
+        List<String> hosts = input.stream().map(this::host).toList();
         if (new HashSet<>(hosts).size() != hosts.size()) {
             throw new IllegalArgumentException("Duplicate hosts");
         }

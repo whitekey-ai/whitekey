@@ -34,7 +34,7 @@ public final class PolicyDecisionEngine {
     private final RuleEffect defaultEffect;
 
     public PolicyDecisionEngine(CelBodyEvaluator bodyEvaluator) {
-        this(bodyEvaluator, new PolicyProperties(RuleEffect.DENY.name()));
+        this(bodyEvaluator, new PolicyProperties(RuleEffect.DENY.name(), PolicyProperties.DEFAULT_CEL_CACHE_SIZE));
     }
 
     @Autowired
@@ -99,6 +99,9 @@ public final class PolicyDecisionEngine {
     }
 
     public Decision evaluateHttp(HttpActionEntity action, List<HttpRuleEntity> rules) {
+        if (action != null && action.isBodyTruncated()) {
+            return evaluateRules(rules, rule -> matchesActionHeaders(action, rule) && !hasBodyCondition(rule));
+        }
         if (action != null
                 && rules.stream().anyMatch(rule -> matchesActionHeaders(action, rule) && hasBodyCondition(rule))
                 && !bodyEvaluator.isValidJson(action.getBody())) {
@@ -113,7 +116,9 @@ public final class PolicyDecisionEngine {
             HttpHeaders headers,
             Path bodyFile,
             List<HttpRuleEntity> rules) {
-        if (!bodyEvaluator.isValidJson(bodyFile)) {
+        boolean hasMatchingBodyRule = rules.stream()
+                .anyMatch(rule -> matchesHeaders(method, url, headers, rule) && hasBodyCondition(rule));
+        if (hasMatchingBodyRule && !bodyEvaluator.isValidJson(bodyFile)) {
             return new Decision(RuleEffect.DENY, INVALID_BODY_REASON, List.of());
         }
         return evaluateRules(rules, rule -> matchesHeaders(method, url, headers, rule) && matchesBody(rule, bodyFile));

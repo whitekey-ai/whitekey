@@ -1,6 +1,7 @@
 package ai.whitekey.proxy;
 
 import ai.whitekey.api.dto.RuleEffect;
+import ai.whitekey.config.ProxyProperties;
 import ai.whitekey.entity.ActionEntity;
 import ai.whitekey.entity.ActionStatus;
 import ai.whitekey.policy.HttpPolicyValidator;
@@ -29,7 +30,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,8 +48,6 @@ import javax.net.ssl.SSLException;
 public class AgentProxyService {
 
     public static final int HTTP_CLIENT_CLOSED_REQUEST = 499;
-    public static final Duration UPSTREAM_CONNECT_TIMEOUT = Duration.ofSeconds(15);
-    public static final long APPROVAL_POLL_INTERVAL_MS = 2000L;
 
     public static final String ERROR_CLIENT_DISCONNECTED = "client_disconnected";
     public static final String ERROR_INTERRUPTED = "interrupted";
@@ -86,6 +84,7 @@ public class AgentProxyService {
     private final ActionService actionService;
     private final ApprovalWaitRegistry waitRegistry;
     private final CredentialInjectionService credentialInjectionService;
+    private final long approvalPollIntervalMs;
     private final HttpClient httpClient;
 
     public AgentProxyService(
@@ -93,16 +92,18 @@ public class AgentProxyService {
             PolicyEvaluationService evaluationService,
             ActionService actionService,
             ApprovalWaitRegistry waitRegistry,
-            CredentialInjectionService credentialInjectionService) {
+            CredentialInjectionService credentialInjectionService,
+            ProxyProperties proxyProperties) {
         this.validator = validator;
         this.evaluationService = evaluationService;
         this.actionService = actionService;
         this.waitRegistry = waitRegistry;
         this.credentialInjectionService = credentialInjectionService;
+        this.approvalPollIntervalMs = proxyProperties.approvalPollInterval().toMillis();
         this.httpClient =
                 HttpClient.newBuilder()
                         .followRedirects(HttpClient.Redirect.NEVER)
-                        .connectTimeout(UPSTREAM_CONNECT_TIMEOUT)
+                        .connectTimeout(proxyProperties.connectTimeout())
                         .build();
     }
 
@@ -245,10 +246,8 @@ public class AgentProxyService {
             String proxyBaseUrl,
             Path tempBodyFile,
             CompletableFuture<Void> clientDisconnected) {
-        EvaluationResult decision = prep.evaluationResult() != null
-                ? prep.evaluationResult()
-                : evaluationService.evaluateWithBodyFile(
-                        prep.httpMethod(), prep.targetUri(), prep.cleanHeaders(), tempBodyFile);
+        EvaluationResult decision = evaluationService.evaluateWithBodyFile(
+                prep.httpMethod(), prep.targetUri(), prep.cleanHeaders(), tempBodyFile);
 
         if (decision.effect() == RuleEffect.DENY) {
             return ProxyResponse.jsonError(HttpStatus.FORBIDDEN.value(), ERROR_POLICY_DENIED, decision.reason());
@@ -318,7 +317,7 @@ public class AgentProxyService {
 
                 try {
                     CompletableFuture.anyOf(waiter, clientDisconnected)
-                            .get(APPROVAL_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+                            .get(approvalPollIntervalMs, TimeUnit.MILLISECONDS);
                 } catch (TimeoutException ignored) {
                 }
             }

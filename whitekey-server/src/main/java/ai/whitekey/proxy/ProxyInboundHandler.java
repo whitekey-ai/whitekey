@@ -1,6 +1,6 @@
 package ai.whitekey.proxy;
 
-import ai.whitekey.api.dto.RuleEffect;
+import ai.whitekey.config.ProxyProperties;
 import ai.whitekey.proxy.AgentProxyService.ProxyResponse;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
@@ -31,8 +31,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 
-import org.springframework.util.unit.DataSize;
-
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -48,17 +46,10 @@ import java.util.concurrent.ExecutorService;
 class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
 
     private static final Logger log = LoggerFactory.getLogger(ProxyInboundHandler.class);
-    private static final int PIPE_BUFFER_SIZE = (int) DataSize.ofKilobytes(64).toBytes();
 
-    public static final String ERROR_MALFORMED_REQUEST = "Malformed HTTP request";
     public static final String ERROR_PIPELINING_UNSUPPORTED = "pipelining_unsupported";
-    public static final String MSG_PIPELINING_UNSUPPORTED = "Concurrent pipelined requests on the same connection are not supported";
     public static final String ERROR_TEMP_FILE = "temp_file_error";
-    public static final String MSG_TEMP_FILE = "Failed creating temp file";
     public static final String ERROR_INTERNAL = "internal_error";
-    public static final String MSG_INTERNAL_ERROR = "Internal proxy error";
-    public static final String TEMP_FILE_PREFIX = "whitekey-body-";
-    public static final String TEMP_FILE_SUFFIX = ".tmp";
 
     private enum State {
         IDLE,
@@ -70,7 +61,7 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
 
     private final AgentProxyService proxyService;
     private final ExecutorService virtualExecutor;
-    private final String defaultAddress;
+    private final ProxyProperties properties;
     private final int boundPort;
 
     private State state = State.IDLE;
@@ -90,11 +81,11 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
     ProxyInboundHandler(
             AgentProxyService proxyService,
             ExecutorService virtualExecutor,
-            String defaultAddress,
+            ProxyProperties properties,
             int boundPort) {
         this.proxyService = proxyService;
         this.virtualExecutor = virtualExecutor;
-        this.defaultAddress = defaultAddress;
+        this.properties = properties;
         this.boundPort = boundPort;
     }
 
@@ -109,11 +100,16 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
 
     private void handleHttpRequest(ChannelHandlerContext ctx, HttpRequest req) {
         if (!req.decoderResult().isSuccess()) {
-            failAndDiscard(ctx, "GET", HttpStatus.BAD_REQUEST, AgentProxyService.ERROR_INVALID_REQUEST, ERROR_MALFORMED_REQUEST);
+            failAndDiscard(ctx, "GET", HttpStatus.BAD_REQUEST, AgentProxyService.ERROR_INVALID_REQUEST, "Malformed HTTP request");
             return;
         }
         if (state != State.IDLE) {
-            failAndDiscard(ctx, req.method().name(), HttpStatus.BAD_REQUEST, ERROR_PIPELINING_UNSUPPORTED, MSG_PIPELINING_UNSUPPORTED);
+            failAndDiscard(
+                    ctx,
+                    req.method().name(),
+                    HttpStatus.BAD_REQUEST,
+                    ERROR_PIPELINING_UNSUPPORTED,
+                    "Concurrent pipelined requests on the same connection are not supported");
             return;
         }
 
@@ -145,10 +141,7 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
             return;
         }
 
-        boolean spoolBody = preparedRequest.needsBody()
-                || (preparedRequest.evaluationResult() != null
-                        && preparedRequest.evaluationResult().effect() == RuleEffect.ASK);
-        if (spoolBody) {
+        if (preparedRequest.needsBody()) {
             startSpooling(ctx);
         } else {
             startStreaming(ctx);
@@ -157,18 +150,18 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
 
     private void startSpooling(ChannelHandlerContext ctx) {
         try {
-            tempFile = Files.createTempFile(TEMP_FILE_PREFIX, TEMP_FILE_SUFFIX);
+            tempFile = Files.createTempFile("whitekey-body-", ".tmp");
             spoolOut = Files.newOutputStream(tempFile);
             state = State.SPOOLING;
         } catch (IOException e) {
-            failAndDiscard(ctx, currentMethod, HttpStatus.INTERNAL_SERVER_ERROR, ERROR_TEMP_FILE, MSG_TEMP_FILE);
+            failAndDiscard(ctx, currentMethod, HttpStatus.INTERNAL_SERVER_ERROR, ERROR_TEMP_FILE, "Failed creating temp file");
         }
     }
 
     private void startStreaming(ChannelHandlerContext ctx) {
         try {
             pipedOut = new PipedOutputStream();
-            PipedInputStream pis = new PipedInputStream(pipedOut, PIPE_BUFFER_SIZE);
+            PipedInputStream pis = new PipedInputStream(pipedOut, (int) properties.streamBufferSize().toBytes());
             state = State.STREAMING;
 
             AgentProxyService.PreparedRequest prep = preparedRequest;
@@ -208,7 +201,7 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
                         error = proxyService.authorizeTunnel(prep, disconnected);
                     } catch (Exception unexpected) {
                         log.error("Unexpected error authorizing CONNECT tunnel", unexpected);
-                        error = ProxyResponse.jsonError(HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_INTERNAL, MSG_INTERNAL_ERROR);
+                        error = ProxyResponse.jsonError(HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_INTERNAL, "Internal proxy error");
                     }
                     if (error != null) {
                         sendResponseFromVirtualThread(ctx, method, error, false);
@@ -224,7 +217,7 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
             cleanup(ctx);
             return;
         }
-        int connectTimeoutMs = (int) AgentProxyService.UPSTREAM_CONNECT_TIMEOUT.toMillis();
+        int connectTimeoutMs = (int) properties.connectTimeout().toMillis();
         Bootstrap bootstrap =
                 new Bootstrap()
                         .group(ctx.channel().eventLoop())
@@ -356,7 +349,7 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
                         response = task.call();
                     } catch (Exception unexpected) {
                         log.error("Unexpected error in proxy execution", unexpected);
-                        response = ProxyResponse.jsonError(HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_INTERNAL, MSG_INTERNAL_ERROR);
+                        response = ProxyResponse.jsonError(HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_INTERNAL, "Internal proxy error");
                     } finally {
                         if (onFinally != null) {
                             onFinally.run();
@@ -392,7 +385,7 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
         String hostHeader = req.headers().get(HttpHeaderNames.HOST);
         return (hostHeader != null && !hostHeader.isBlank())
                 ? "http://" + hostHeader
-                : "http://" + defaultAddress + ":" + boundPort;
+                : "http://" + properties.address() + ":" + boundPort;
     }
 
     private static void removeHandler(ChannelPipeline pipeline, Class<? extends ChannelHandler> type) {
@@ -458,7 +451,13 @@ class ProxyInboundHandler extends SimpleChannelInboundHandler<HttpObject> {
             ProxyResponse response,
             boolean keepAlive) {
         try {
-            ProxyResponseWriter.write(ctx, requestMethod, response, keepAlive, () -> cleanup(ctx));
+            ProxyResponseWriter.write(
+                    ctx,
+                    requestMethod,
+                    response,
+                    keepAlive,
+                    (int) properties.streamBufferSize().toBytes(),
+                    () -> cleanup(ctx));
         } catch (Throwable error) {
             ctx.executor().execute(() -> cleanup(ctx));
             throw error;

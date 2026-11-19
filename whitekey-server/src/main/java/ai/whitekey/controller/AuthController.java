@@ -1,6 +1,5 @@
 package ai.whitekey.controller;
 
-import ai.whitekey.config.SecurityConfig;
 import ai.whitekey.service.AdminTokenService;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -44,11 +43,7 @@ public class AuthController {
 
     @GetMapping("/status")
     public AuthStatusResponse status(HttpServletRequest request) {
-        String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
-        String token = (authHeader != null && authHeader.regionMatches(true, 0, SecurityConfig.BEARER_PREFIX, 0, SecurityConfig.BEARER_PREFIX.length()))
-                ? authHeader.substring(SecurityConfig.BEARER_PREFIX.length()).strip()
-                : null;
-
+        String token = AdminTokenService.extractBearerToken(request.getHeader(HttpHeaders.AUTHORIZATION));
         return new AuthStatusResponse(adminTokenService.isValidToken(token));
     }
 

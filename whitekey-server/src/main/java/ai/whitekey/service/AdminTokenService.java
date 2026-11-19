@@ -16,6 +16,7 @@ import java.util.HexFormat;
 public class AdminTokenService {
 
     private static final Logger log = LoggerFactory.getLogger(AdminTokenService.class);
+    public static final String BEARER_PREFIX = "Bearer ";
     public static final String DEFAULT_TOKEN_FILE_NAME = "whitekey_admin_token";
     public static final String DEFAULT_TOKEN_PREFIX = "whitekey_admin_token_";
     public static final int TOKEN_RANDOM_BYTES = 32;
@@ -59,6 +60,14 @@ public class AdminTokenService {
         byte[] randomBytes = new byte[TOKEN_RANDOM_BYTES];
         new SecureRandom().nextBytes(randomBytes);
         return tokenPrefix + HexFormat.of().formatHex(randomBytes);
+    }
+
+    public static String extractBearerToken(String authHeader) {
+        if (authHeader == null || !authHeader.regionMatches(true, 0, BEARER_PREFIX, 0, BEARER_PREFIX.length())) {
+            return null;
+        }
+        String token = authHeader.substring(BEARER_PREFIX.length()).strip();
+        return token.isEmpty() ? null : token;
     }
 
     public boolean isValidToken(String candidate) {

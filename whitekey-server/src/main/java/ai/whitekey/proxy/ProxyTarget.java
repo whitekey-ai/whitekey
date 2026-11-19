@@ -147,6 +147,9 @@ public record ProxyTarget(
         if (lower.startsWith(SCHEME_HTTPS_PREFIX) || lower.startsWith(SCHEME_HTTP_PREFIX)) {
             return base + "/" + location;
         }
+        if (location.startsWith("//")) {
+            return base + "/" + scheme + ":" + location;
+        }
         if (location.startsWith("/")) {
             String authority = explicitPort ? host + ":" + port : host;
             return base + "/" + scheme + "://" + authority + location;

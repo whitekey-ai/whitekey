@@ -17,7 +17,6 @@ import org.springframework.security.web.authentication.preauth.PreAuthenticatedA
 @Configuration(proxyBeanMethods = false)
 public class SecurityConfig {
 
-    public static final String BEARER_PREFIX = "Bearer ";
     public static final String ADMIN_PRINCIPAL = "admin";
     public static final String ERROR_ADMIN_TOKEN_REQUIRED = "Valid WhiteKey Admin Token required";
 
@@ -33,12 +32,10 @@ public class SecurityConfig {
                         res.sendError(HttpServletResponse.SC_UNAUTHORIZED, ERROR_ADMIN_TOKEN_REQUIRED)))
                 .addFilterBefore((request, response, chain) -> {
                     HttpServletRequest req = (HttpServletRequest) request;
-                    String auth = req.getHeader(HttpHeaders.AUTHORIZATION);
-                    if (auth != null && auth.regionMatches(true, 0, BEARER_PREFIX, 0, BEARER_PREFIX.length())) {
-                        String token = auth.substring(BEARER_PREFIX.length()).strip();
-                        if (tokenService.isValidToken(token)) {
-                            SecurityContextHolder.getContext().setAuthentication(new PreAuthenticatedAuthenticationToken(ADMIN_PRINCIPAL, token, null));
-                        }
+                    String token = AdminTokenService.extractBearerToken(req.getHeader(HttpHeaders.AUTHORIZATION));
+                    if (token != null && tokenService.isValidToken(token)) {
+                        SecurityContextHolder.getContext().setAuthentication(
+                                new PreAuthenticatedAuthenticationToken(ADMIN_PRINCIPAL, token, null));
                     }
                     chain.doFilter(request, response);
                 }, UsernamePasswordAuthenticationFilter.class)

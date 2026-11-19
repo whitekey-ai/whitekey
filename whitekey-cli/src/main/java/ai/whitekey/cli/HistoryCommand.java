@@ -15,7 +15,7 @@ public class HistoryCommand extends BaseCommand {
 
     public static final String DEFAULT_LIMIT = "20";
 
-    @Option(names = "--limit", defaultValue = DEFAULT_LIMIT, description = "Max number of actions (1-100)")
+    @Option(names = "--limit", defaultValue = DEFAULT_LIMIT, description = "Max number of actions")
     private int limit;
 
     @Option(names = "--status", description = "Filter by status (ALLOWED, DENIED, etc.)")

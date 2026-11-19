@@ -15,7 +15,6 @@ import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
-import org.springframework.util.unit.DataSize;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -23,7 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 final class ProxyResponseWriter {
-    private static final int BUFFER_SIZE = (int) DataSize.ofKilobytes(64).toBytes();
+    private static final int DEFAULT_BUFFER_SIZE = 64 * 1024;
 
     private ProxyResponseWriter() {}
 
@@ -32,7 +31,7 @@ final class ProxyResponseWriter {
             String requestMethod,
             ProxyResponse response,
             boolean keepAlive) {
-        write(ctx, requestMethod, response, keepAlive, null);
+        write(ctx, requestMethod, response, keepAlive, DEFAULT_BUFFER_SIZE, null);
     }
 
     public static void write(
@@ -40,6 +39,7 @@ final class ProxyResponseWriter {
             String requestMethod,
             ProxyResponse response,
             boolean keepAlive,
+            int bufferSize,
             Runnable beforeFinalFlush) {
         boolean head = HttpMethod.HEAD.name().equalsIgnoreCase(requestMethod);
         boolean noContent = response.statusCode() == HttpResponseStatus.NO_CONTENT.code()
@@ -56,7 +56,7 @@ final class ProxyResponseWriter {
 
             boolean streamFailed = false;
             try (InputStream in = response.bodyStream()) {
-                byte[] chunk = new byte[BUFFER_SIZE];
+                byte[] chunk = new byte[Math.max(1024, bufferSize)];
                 int read;
                 while (ctx.channel().isOpen() && (read = in.read(chunk)) != -1) {
                     ctx.writeAndFlush(new DefaultHttpContent(Unpooled.copiedBuffer(chunk, 0, read)));

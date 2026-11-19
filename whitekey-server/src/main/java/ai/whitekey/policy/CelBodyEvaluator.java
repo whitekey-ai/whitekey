@@ -1,5 +1,6 @@
 package ai.whitekey.policy;
 
+import ai.whitekey.config.PolicyProperties;
 import com.google.protobuf.NullValue;
 import dev.cel.bundle.Cel;
 import dev.cel.bundle.CelFactory;
@@ -11,11 +12,13 @@ import dev.cel.common.types.SimpleType;
 import dev.cel.parser.CelParser;
 import dev.cel.parser.CelParserFactory;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import tools.jackson.core.JsonParser;
 import tools.jackson.core.JsonToken;
 import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.io.ByteArrayInputStream;
@@ -38,11 +41,23 @@ public class CelBodyEvaluator {
 
     private static final JsonMapper JSON = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .disable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .build();
     private static final CelParser PARSER = CelParserFactory.standardCelParserBuilder().build();
 
-    private static final int MAX_CACHE_ENTRIES = 1000;
+    private final int maxCacheEntries;
     private final Map<String, CompiledCelProgram> cache = new ConcurrentHashMap<>();
+
+    public CelBodyEvaluator() {
+        this.maxCacheEntries = PolicyProperties.DEFAULT_CEL_CACHE_SIZE;
+    }
+
+    @Autowired
+    public CelBodyEvaluator(PolicyProperties policyProperties) {
+        this.maxCacheEntries = policyProperties != null
+                ? policyProperties.celCacheSize()
+                : PolicyProperties.DEFAULT_CEL_CACHE_SIZE;
+    }
 
     private record CompiledCelProgram(Cel.Program program, Set<String> variables) {}
 
@@ -181,7 +196,10 @@ public class CelBodyEvaluator {
     }
 
     private CompiledCelProgram getOrCompile(String expression) {
-        if (cache.size() >= MAX_CACHE_ENTRIES) {
+        if (maxCacheEntries <= 0) {
+            return compile(expression);
+        }
+        if (cache.size() >= maxCacheEntries) {
             cache.clear();
         }
         return cache.computeIfAbsent(expression, this::compile);

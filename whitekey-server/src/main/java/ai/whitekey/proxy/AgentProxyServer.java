@@ -20,7 +20,6 @@ import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
-import org.springframework.util.unit.DataSize;
 
 import java.net.InetSocketAddress;
 import java.util.concurrent.ExecutorService;
@@ -31,11 +30,6 @@ import java.util.concurrent.TimeUnit;
 public class AgentProxyServer implements SmartLifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(AgentProxyServer.class);
-    private static final int MAX_INITIAL_LINE_LENGTH = (int) DataSize.ofKilobytes(8).toBytes();
-    private static final int MAX_HEADER_SIZE = (int) DataSize.ofKilobytes(32).toBytes();
-    private static final int MAX_CHUNK_SIZE = (int) DataSize.ofKilobytes(16).toBytes();
-    private static final long SHUTDOWN_QUIET_PERIOD_SECONDS = 0L;
-    private static final long SHUTDOWN_TIMEOUT_SECONDS = 2L;
 
     private final ProxyProperties properties;
     private final AgentProxyService proxyService;
@@ -78,9 +72,16 @@ public class AgentProxyServer implements SmartLifecycle {
                                         @Override
                                         protected void initChannel(SocketChannel ch) {
                                             ch.pipeline()
-                                                    .addLast(new HttpServerCodec(MAX_INITIAL_LINE_LENGTH, MAX_HEADER_SIZE, MAX_CHUNK_SIZE))
+                                                    .addLast(new HttpServerCodec(
+                                                            (int) properties.maxInitialLineLength().toBytes(),
+                                                            (int) properties.maxHeaderSize().toBytes(),
+                                                            (int) properties.maxChunkSize().toBytes()))
                                                     .addLast(new HttpServerExpectContinueHandler())
-                                                    .addLast(new ProxyInboundHandler(proxyService, virtualExecutor, properties.address(), getBoundPort()));
+                                                    .addLast(new ProxyInboundHandler(
+                                                            proxyService,
+                                                            virtualExecutor,
+                                                            properties,
+                                                            getBoundPort()));
                                         }
                                     });
 
@@ -113,12 +114,13 @@ public class AgentProxyServer implements SmartLifecycle {
             serverChannel.close().syncUninterruptibly();
             serverChannel = null;
         }
+        long shutdownTimeoutMs = properties.shutdownTimeout().toMillis();
         if (workerGroup != null) {
-            workerGroup.shutdownGracefully(SHUTDOWN_QUIET_PERIOD_SECONDS, SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS).syncUninterruptibly();
+            workerGroup.shutdownGracefully(0L, shutdownTimeoutMs, TimeUnit.MILLISECONDS).syncUninterruptibly();
             workerGroup = null;
         }
         if (bossGroup != null) {
-            bossGroup.shutdownGracefully(SHUTDOWN_QUIET_PERIOD_SECONDS, SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS).syncUninterruptibly();
+            bossGroup.shutdownGracefully(0L, shutdownTimeoutMs, TimeUnit.MILLISECONDS).syncUninterruptibly();
             bossGroup = null;
         }
         if (virtualExecutor != null) {

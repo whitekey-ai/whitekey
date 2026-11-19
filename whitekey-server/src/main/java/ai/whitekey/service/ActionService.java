@@ -12,6 +12,7 @@ import ai.whitekey.repository.ActionRepository;
 import ai.whitekey.repository.HttpActionRepository;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Service;
@@ -49,6 +50,10 @@ public class ActionService {
         this.maxStoredBodyBytes = (int) maxStoredBodySize.toBytes();
     }
 
+    public int getMaxStoredBodyBytes() {
+        return maxStoredBodyBytes;
+    }
+
     @Transactional
     public HttpActionEntity recordHttp(
             HttpMethod method,
@@ -56,12 +61,25 @@ public class ActionService {
             HttpHeaders headers,
             byte[] body,
             ActionStatus status) {
+        return recordHttp(method, url, headers, body, false, status);
+    }
+
+    @Transactional
+    public HttpActionEntity recordHttp(
+            HttpMethod method,
+            URI url,
+            HttpHeaders headers,
+            byte[] body,
+            boolean bodyTruncated,
+            ActionStatus status) {
         ProxyTarget target = ProxyTarget.fromUri(url);
         Map<String, List<String>> queryParams = HttpPolicyValidator.parseQueryParams(target.rawQuery());
         HttpHeaders safeHeaders = headers != null ? HttpHeaders.readOnlyHttpHeaders(headers) : HttpHeaders.EMPTY;
         byte[] safeBody = body != null ? body : new byte[0];
+        boolean truncated = bodyTruncated;
         if (safeBody.length > maxStoredBodyBytes) {
             safeBody = Arrays.copyOf(safeBody, maxStoredBodyBytes);
+            truncated = true;
         }
 
         HttpActionEntity entity = new HttpActionEntity(
@@ -74,6 +92,7 @@ public class ActionService {
                 safeHeaders,
                 safeBody,
                 status);
+        entity.setBodyTruncated(truncated);
         return httpActionRepository.save(entity);
     }
 
@@ -95,7 +114,10 @@ public class ActionService {
             ActionStatus status,
             String method,
             String host) {
-        var pageable = PageRequests.of(page, limit);
+        if (page < 0 || limit < 1) {
+            throw new IllegalArgumentException("Page must be >= 0 and limit >= 1");
+        }
+        var pageable = PageRequest.of(page, limit);
         String normalizedType = (type == null || type.isBlank()) ? null : type.trim().toLowerCase(Locale.ROOT);
         HttpMethod normalizedMethod = (method == null || method.isBlank()) ? null : HttpMethod.valueOf(method.trim().toUpperCase(Locale.ROOT));
         String normalizedHost = (host == null || host.isBlank()) ? null : host.trim().toLowerCase(Locale.ROOT);
