@@ -23,17 +23,13 @@ java --enable-native-access=ALL-UNNAMED -jar whitekey-cli/target/whitekey-cli-*.
 
 ## Proxy Setup
 
-WhiteKey generates a local Root CA at `~/.local/share/whitekey/certs/whitekey_ca.crt` (also served at `GET http://127.0.0.1:1111/ca.crt`). Point your agent at the proxy and trust the CA:
+WhiteKey is a standard HTTP/HTTPS proxy (`127.0.0.1:9999` by default). To inspect HTTPS requests and inject credentials, it terminates TLS using a Root CA (auto-generated on first start if absent):
 
-```bash
-CA=~/.local/share/whitekey/certs/whitekey_ca.crt
-export http_proxy=http://127.0.0.1:9999 https_proxy=http://127.0.0.1:9999
-export HTTP_PROXY="$http_proxy" HTTPS_PROXY="$https_proxy"
-export no_proxy=127.0.0.1,localhost NO_PROXY=127.0.0.1,localhost
-export SSL_CERT_FILE="$CA" NODE_EXTRA_CA_CERTS="$CA" REQUESTS_CA_BUNDLE="$CA" GIT_SSL_CAINFO="$CA"
-```
+- **CA file:** `PROXY_CA_CERT_FILE` (default `certs/whitekey_ca.crt` under `WHITEKEY_DATA_DIR`, or an absolute path), stored separately from private keys and tokens.
+- **CA endpoint:** `GET /ca.crt` on the Admin API (serves the active CA certificate).
+- **Custom CA:** Provide your own certificate and key via `PROXY_CA_CERT_FILE` and `PROXY_CA_KEY_FILE`.
 
-For isolated sandboxes (VMs or containers), expose only `~/.local/share/whitekey/certs` (or `GET /ca.crt`) so private keys and admin tokens stay off the sandbox.
+Configure your agent or environment to route HTTP/HTTPS traffic through the proxy and trust this CA certificate for HTTPS.
 
 ## CLI
 
