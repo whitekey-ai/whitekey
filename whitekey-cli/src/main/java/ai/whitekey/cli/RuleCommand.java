@@ -97,7 +97,7 @@ public class RuleCommand extends BaseCommand {
         @Option(names = "--methods", split = ",", description = "Comma-separated HTTP methods (e.g. GET,POST)")
         private List<String> methods = List.of();
 
-        @Option(names = "--hosts", required = true, split = ",", description = "Comma-separated exact DNS hosts (e.g. api.github.com,slack.com)")
+        @Option(names = "--hosts", required = true, split = ",", description = "Comma-separated exact DNS hosts or IP addresses (e.g. api.github.com,127.0.0.1,::1)")
         private List<String> hosts = List.of();
 
         @Option(names = "--ports", split = ",", description = "Comma-separated ports (e.g. 80,443)")

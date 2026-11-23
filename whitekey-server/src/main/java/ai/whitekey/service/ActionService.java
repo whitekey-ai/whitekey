@@ -110,7 +110,7 @@ public class ActionService {
         var pageable = PageRequest.of(page, limit);
         String normalizedType = (type == null || type.isBlank()) ? null : type.trim().toLowerCase(Locale.ROOT);
         HttpMethod normalizedMethod = (method == null || method.isBlank()) ? null : HttpMethod.valueOf(method.trim().toUpperCase(Locale.ROOT));
-        String normalizedHost = (host == null || host.isBlank()) ? null : host.trim().toLowerCase(Locale.ROOT);
+        String normalizedHost = (host == null || host.isBlank()) ? null : HttpPolicyValidator.normalizeHostIfValid(host);
 
         if (normalizedType == null && normalizedMethod == null && normalizedHost == null) {
             return status == null ? actionRepository.findAllByOrderByIdDesc(pageable) : actionRepository.findByStatusOrderByIdDesc(status, pageable);

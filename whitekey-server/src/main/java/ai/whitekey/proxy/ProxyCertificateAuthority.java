@@ -1,6 +1,7 @@
 package ai.whitekey.proxy;
 
 import ai.whitekey.config.ProxyProperties;
+import ai.whitekey.policy.HttpPolicyValidator;
 import ai.whitekey.service.SecretFileLoader;
 import io.netty.handler.ssl.ApplicationProtocolConfig;
 import io.netty.handler.ssl.ApplicationProtocolNames;
@@ -129,7 +130,7 @@ public class ProxyCertificateAuthority {
     }
 
     public SslContext sslContextForHost(String host) {
-        String normalized = host.trim().toLowerCase(Locale.ROOT);
+        String normalized = HttpPolicyValidator.normalizeHostIfValid(host);
         Instant renewThreshold = Instant.now().plus(LEAF_RENEW_WINDOW);
         CachedSslContext cached = sslContexts.get(normalized);
         if (cached != null && cached.expiresAt().isAfter(renewThreshold)) {
@@ -246,10 +247,13 @@ public class ProxyCertificateAuthority {
             builder.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.digitalSignature));
             builder.addExtension(
                     Extension.extendedKeyUsage, false, new ExtendedKeyUsage(KeyPurposeId.id_kp_serverAuth));
+            int sanType = HttpPolicyValidator.isIpAddress(host)
+                    ? GeneralName.iPAddress
+                    : GeneralName.dNSName;
             builder.addExtension(
                     Extension.subjectAlternativeName,
                     false,
-                    new GeneralNames(new GeneralName(GeneralName.dNSName, host)));
+                    new GeneralNames(new GeneralName(sanType, host)));
             builder.addExtension(
                     Extension.subjectKeyIdentifier,
                     false,

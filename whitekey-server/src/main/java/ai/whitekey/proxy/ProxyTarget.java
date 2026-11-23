@@ -1,6 +1,7 @@
 package ai.whitekey.proxy;
 
 import ai.whitekey.api.dto.ProtocolConstants;
+import ai.whitekey.policy.HttpPolicyValidator;
 
 import java.net.URI;
 import java.util.Locale;
@@ -76,11 +77,15 @@ public record ProxyTarget(
             return new ProxyTarget(ProtocolConstants.HTTP, "", DEFAULT_HTTP_PORT, false, "/", null);
         }
         String scheme = url.getScheme() != null ? url.getScheme().toLowerCase(Locale.ROOT) : ProtocolConstants.HTTP;
-        String host = url.getHost() != null ? url.getHost().toLowerCase(Locale.ROOT) : "";
+        String host = url.getHost() != null ? HttpPolicyValidator.normalizeHostIfValid(url.getHost()) : "";
         int port = url.getPort() != -1 ? url.getPort() : defaultPort(scheme);
         String rawPath = url.getRawPath();
         String path = (rawPath != null && !rawPath.isEmpty()) ? rawPath : "/";
         return new ProxyTarget(scheme, host, port, url.getPort() != -1, path, url.getRawQuery());
+    }
+
+    public ProxyTarget withHost(String canonicalHost) {
+        return new ProxyTarget(scheme, canonicalHost, port, explicitPort, path, rawQuery);
     }
 
     private static int defaultPort(String scheme) {
@@ -113,30 +118,69 @@ public record ProxyTarget(
 
         String host;
         int port;
-        int colon = authority.lastIndexOf(':');
-        if (colon > 0 && authority.indexOf(':') == colon) {
-            host = authority.substring(0, colon).toLowerCase(Locale.ROOT);
-            try {
-                port = Integer.parseInt(authority.substring(colon + 1));
-            } catch (NumberFormatException error) {
-                throw new IllegalArgumentException("Invalid target port");
+        if (authority.startsWith("[")) {
+            int close = authority.indexOf(']');
+            if (close <= 1) {
+                throw new IllegalArgumentException("Invalid target host");
             }
-            if (port < MIN_PORT || port > MAX_PORT) {
-                throw new IllegalArgumentException("Invalid target port");
+            host = HttpPolicyValidator.canonicalizeIpv6(authority.substring(1, close));
+            String rest = authority.substring(close + 1);
+            if (rest.isEmpty()) {
+                port = defaultPort;
+            } else if (rest.startsWith(":")) {
+                port = parsePort(rest.substring(1));
+            } else {
+                throw new IllegalArgumentException("Invalid target host");
             }
-        } else if (colon >= 0) {
-            throw new IllegalArgumentException("Invalid target host");
         } else {
-            host = authority.toLowerCase(Locale.ROOT);
-            port = defaultPort;
+            if (authority.indexOf('[') >= 0 || authority.indexOf(']') >= 0) {
+                throw new IllegalArgumentException("Invalid target host");
+            }
+            int colon = authority.lastIndexOf(':');
+            if (colon > 0 && authority.indexOf(':') == colon) {
+                host = authority.substring(0, colon).toLowerCase(Locale.ROOT);
+                port = parsePort(authority.substring(colon + 1));
+            } else if (colon >= 0) {
+                throw new IllegalArgumentException("Invalid target host");
+            } else {
+                host = authority.toLowerCase(Locale.ROOT);
+                port = defaultPort;
+            }
         }
 
         return new ProxyTarget(scheme, host, port, port != defaultPort, targetPath, rawQuery);
     }
 
+    private static int parsePort(String rawPort) {
+        if (rawPort.isEmpty()) {
+            throw new IllegalArgumentException("Invalid target port");
+        }
+        for (int i = 0; i < rawPort.length(); i++) {
+            char c = rawPort.charAt(i);
+            if (c < '0' || c > '9') {
+                throw new IllegalArgumentException("Invalid target port");
+            }
+        }
+        int port;
+        try {
+            port = Integer.parseInt(rawPort);
+        } catch (NumberFormatException error) {
+            throw new IllegalArgumentException("Invalid target port");
+        }
+        if (port < MIN_PORT || port > MAX_PORT) {
+            throw new IllegalArgumentException("Invalid target port");
+        }
+        return port;
+    }
+
     public URI toUri(String effectiveRawQuery) {
         StringBuilder sb = new StringBuilder();
-        sb.append(scheme).append("://").append(host);
+        sb.append(scheme).append("://");
+        if (host.indexOf(':') >= 0) {
+            sb.append('[').append(host).append(']');
+        } else {
+            sb.append(host);
+        }
         if (explicitPort) {
             sb.append(':').append(port);
         }

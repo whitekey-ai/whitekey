@@ -1,11 +1,11 @@
 package ai.whitekey.config;
 
+import ai.whitekey.policy.HttpPolicyValidator;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.unit.DataSize;
 
 import java.time.Duration;
 import java.util.List;
-import java.util.Locale;
 
 @ConfigurationProperties(prefix = "app.proxy")
 public record ProxyProperties(
@@ -33,7 +33,7 @@ public record ProxyProperties(
                 ? List.of()
                 : tlsPassthroughHosts.stream()
                         .filter(host -> host != null && !host.isBlank())
-                        .map(host -> host.trim().toLowerCase(Locale.ROOT))
+                        .map(HttpPolicyValidator::normalizeHostIfValid)
                         .toList();
     }
 
@@ -41,12 +41,13 @@ public record ProxyProperties(
         if (host == null || host.isBlank() || tlsPassthroughHosts.isEmpty()) {
             return false;
         }
-        String normalized = host.trim().toLowerCase(Locale.ROOT);
+        String normalized = HttpPolicyValidator.normalizeHostIfValid(host);
+        boolean isIp = HttpPolicyValidator.isIpAddress(normalized);
         for (String pattern : tlsPassthroughHosts) {
             if (pattern.equals(normalized)) {
                 return true;
             }
-            if (pattern.startsWith("*.") && normalized.endsWith(pattern.substring(1))
+            if (!isIp && pattern.startsWith("*.") && normalized.endsWith(pattern.substring(1))
                     && normalized.length() > pattern.length() - 1) {
                 return true;
             }

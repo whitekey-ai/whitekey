@@ -138,8 +138,8 @@ public class AgentProxyService {
 
     public ProxyTarget parseConnectTarget(String rawAuthority) {
         ProxyTarget target = ProxyTarget.parseConnect(rawAuthority);
-        validator.host(target.host());
-        return target;
+        String canonicalHost = validator.host(target.host());
+        return target.withHost(canonicalHost);
     }
 
     public PreparedRequest prepareConnect(ProxyTarget target, HttpHeaders requestHeaders) {
@@ -224,17 +224,18 @@ public class AgentProxyService {
             String rawQuery,
             HttpHeaders requestHeaders) {
         HttpMethod httpMethod = validator.method(method);
-        validator.host(target.host());
-        validator.path(target.path());
+        String canonicalHost = validator.host(target.host());
+        ProxyTarget canonicalTarget = target.withHost(canonicalHost);
+        validator.path(canonicalTarget.path());
         validator.query(rawQuery);
-        URI targetUri = target.toUri(rawQuery);
+        URI targetUri = canonicalTarget.toUri(rawQuery);
         HttpHeaders cleanHeaders = sanitizeRequestHeaders(requestHeaders);
 
         HeaderEvaluationResult headerEval = evaluationService.evaluateHeaders(httpMethod, targetUri, cleanHeaders);
         if (headerEval.needsBody()) {
-            return new PreparedRequest(target, targetUri, httpMethod, cleanHeaders, true, null, null);
+            return new PreparedRequest(canonicalTarget, targetUri, httpMethod, cleanHeaders, true, null, null);
         }
-        return finalizePreparedRequest(target, targetUri, httpMethod, cleanHeaders, headerEval.finalResult());
+        return finalizePreparedRequest(canonicalTarget, targetUri, httpMethod, cleanHeaders, headerEval.finalResult());
     }
 
     private static PreparedRequest invalidRequest(IllegalArgumentException error) {

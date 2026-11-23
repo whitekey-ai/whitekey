@@ -28,8 +28,18 @@ public final class HttpPolicyValidator {
     private static final int ASCII_PRINTABLE_MIN = 0x20;
     private static final int ASCII_DEL = 0x7F;
     private static final int ASCII_BOUNDARY = 128;
+    private static final int IPV4_OCTET_COUNT = 4;
+    private static final int MAX_IPV4_OCTET = 255;
+    private static final int IPV6_GROUP_COUNT = 8;
+    private static final int IPV6_EMBEDDED_IPV4_GROUPS = 2;
+    private static final int IPV6_BYTE_SHIFT = 8;
+    private static final int MIN_IPV6_COMPRESS_RUN = 2;
+    private static final int IPV4_MAPPED_PREFIX_ZERO_GROUPS = 5;
+    private static final int IPV4_MAPPED_MARKER_GROUP = 0xFFFF;
 
-    private static final Pattern IPV4_PATTERN = Pattern.compile("[0-9]+([.][0-9]+){3}");
+    private static final Pattern STRICT_IPV4_OCTET_PATTERN = Pattern.compile("0|[1-9][0-9]{0,2}");
+    private static final Pattern IPV6_HEX_GROUP_PATTERN = Pattern.compile("[0-9a-f]{1,4}");
+    private static final Pattern NUMERIC_OR_HEX_LABEL_PATTERN = Pattern.compile("[0-9]+|0x[0-9a-f]+");
     private static final Pattern DNS_LABEL_PATTERN = Pattern.compile("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?");
     private static final Pattern HTTP_METHOD_PATTERN = Pattern.compile("[a-z0-9!#$%&'*+.^_`|~\\-]+");
     private static final Pattern ASCII_PATH_PATTERN = Pattern.compile("/[A-Za-z0-9%/_~!$&'()+,;=:@.\\-]*");
@@ -69,18 +79,142 @@ public final class HttpPolicyValidator {
     }
 
     public String host(String input) {
+        return normalizeHost(input);
+    }
+
+    /**
+     * Validates and normalizes an exact DNS hostname or canonical IPv4/IPv6 host literal.
+     */
+    public static String normalizeHost(String input) {
         requireText(input);
-        String host = input.toLowerCase(Locale.ROOT);
-        if (host.length() > MAX_DNS_HOST_LENGTH || IPV4_PATTERN.matcher(host).matches()) {
-            throw new IllegalArgumentException("Expected an exact DNS host name");
+        String raw = input.toLowerCase(Locale.ROOT);
+        if (raw.startsWith("[") || raw.endsWith("]")) {
+            if (!raw.startsWith("[") || !raw.endsWith("]")) {
+                throw new IllegalArgumentException("Invalid IPv6 host literal");
+            }
+            return canonicalizeIpv6(raw.substring(1, raw.length() - 1));
         }
-        for (String label : host.split("[.]", -1)) {
+        if (raw.indexOf(':') >= 0) {
+            return canonicalizeIpv6(raw);
+        }
+        String ipv4 = tryParseStrictIpv4(raw);
+        if (ipv4 != null) {
+            return ipv4;
+        }
+        if (raw.length() > MAX_DNS_HOST_LENGTH) {
+            throw new IllegalArgumentException("Expected an exact DNS host name or IP address");
+        }
+        String[] labels = raw.split("[.]", -1);
+        for (String label : labels) {
             if (!DNS_LABEL_PATTERN.matcher(label).matches()) {
                 throw new IllegalArgumentException(
-                        "Hosts must be exact DNS names without schemes, ports or wildcards");
+                        "Hosts must be exact DNS names or canonical IPv4/IPv6 addresses without schemes, ports or wildcards");
             }
         }
-        return host;
+        if (NUMERIC_OR_HEX_LABEL_PATTERN.matcher(labels[labels.length - 1]).matches()) {
+            throw new IllegalArgumentException(
+                    "Hosts must be exact DNS names or canonical IPv4/IPv6 addresses without schemes, ports or wildcards");
+        }
+        return raw;
+    }
+
+    /**
+     * Parses an unbracketed IPv6 literal (with optional strict dotted-quad tail) into canonical RFC 5952 form.
+     */
+    public static String canonicalizeIpv6(String input) {
+        if (input == null || input.isEmpty()
+                || input.indexOf('%') >= 0
+                || input.indexOf('[') >= 0
+                || input.indexOf(']') >= 0) {
+            throw new IllegalArgumentException("Invalid IPv6 address");
+        }
+        String raw = input.toLowerCase(Locale.ROOT);
+        int doubleColon = raw.indexOf("::");
+        if (doubleColon >= 0 && raw.indexOf("::", doubleColon + 1) >= 0) {
+            throw new IllegalArgumentException("Invalid IPv6 address");
+        }
+
+        boolean hasEmbeddedIpv4 = raw.indexOf('.') >= 0;
+        String hexPart = raw;
+        int tailGroup0 = 0;
+        int tailGroup1 = 0;
+        if (hasEmbeddedIpv4) {
+            int lastColon = raw.lastIndexOf(':');
+            if (lastColon < 0) {
+                throw new IllegalArgumentException("Invalid IPv6 address");
+            }
+            int[] octets = parseStrictIpv4Octets(raw.substring(lastColon + 1));
+            if (octets == null) {
+                throw new IllegalArgumentException("Invalid embedded IPv4 address in IPv6 literal");
+            }
+            tailGroup0 = (octets[0] << IPV6_BYTE_SHIFT) | octets[1];
+            tailGroup1 = (octets[2] << IPV6_BYTE_SHIFT) | octets[3];
+            hexPart = (doubleColon >= 0 && lastColon == doubleColon + 1)
+                    ? raw.substring(0, lastColon + 1)
+                    : raw.substring(0, lastColon);
+            if (hexPart.isEmpty()) {
+                throw new IllegalArgumentException("Invalid IPv6 address");
+            }
+        }
+
+        int targetHexGroups = hasEmbeddedIpv4 ? IPV6_GROUP_COUNT - IPV6_EMBEDDED_IPV4_GROUPS : IPV6_GROUP_COUNT;
+        int[] groups = new int[IPV6_GROUP_COUNT];
+        parseIpv6HexGroups(hexPart, targetHexGroups, groups);
+        if (hasEmbeddedIpv4) {
+            groups[targetHexGroups] = tailGroup0;
+            groups[targetHexGroups + 1] = tailGroup1;
+        }
+        if (isIpv4MappedIpv6(groups)) {
+            throw new IllegalArgumentException(
+                    "IPv4-mapped IPv6 addresses are not supported; use the IPv4 address directly");
+        }
+        return formatCanonicalIpv6(groups);
+    }
+
+    /**
+     * Returns {@code true} if {@code host} is a valid canonical/unambiguous IPv4 or IPv6 literal.
+     */
+    public static boolean isIpAddress(String host) {
+        if (host == null || host.isEmpty()) {
+            return false;
+        }
+        if (tryParseStrictIpv4(host) != null) {
+            return true;
+        }
+        if (host.indexOf(':') < 0) {
+            return false;
+        }
+        String candidate = (host.startsWith("[") && host.endsWith("]"))
+                ? host.substring(1, host.length() - 1)
+                : host;
+        try {
+            canonicalizeIpv6(candidate);
+            return true;
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * Trims and canonicalizes valid DNS/IP hosts (preserving {@code *.domain} wildcards in lowercase);
+     * returns trimmed lowercase input if not a valid host literal.
+     */
+    public static String normalizeHostIfValid(String rawHost) {
+        if (rawHost == null) {
+            return "";
+        }
+        String trimmed = rawHost.trim();
+        if (trimmed.isEmpty()) {
+            return "";
+        }
+        if (trimmed.startsWith("*.")) {
+            return trimmed.toLowerCase(Locale.ROOT);
+        }
+        try {
+            return normalizeHost(trimmed);
+        } catch (IllegalArgumentException ignored) {
+            return trimmed.toLowerCase(Locale.ROOT);
+        }
     }
 
     public List<String> hosts(List<String> input) {
@@ -307,5 +441,118 @@ public final class HttpPolicyValidator {
                 || (b >= 'a' && b <= 'z')
                 || (b >= '0' && b <= '9')
                 || b == '-' || b == '.' || b == '_' || b == '~';
+    }
+
+    private static String tryParseStrictIpv4(String raw) {
+        return parseStrictIpv4Octets(raw) != null ? raw : null;
+    }
+
+    private static int[] parseStrictIpv4Octets(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return null;
+        }
+        String[] parts = raw.split("[.]", -1);
+        if (parts.length != IPV4_OCTET_COUNT) {
+            return null;
+        }
+        int[] octets = new int[IPV4_OCTET_COUNT];
+        for (int i = 0; i < IPV4_OCTET_COUNT; i++) {
+            String part = parts[i];
+            if (!STRICT_IPV4_OCTET_PATTERN.matcher(part).matches()) {
+                return null;
+            }
+            int value = Integer.parseInt(part);
+            if (value > MAX_IPV4_OCTET) {
+                return null;
+            }
+            octets[i] = value;
+        }
+        return octets;
+    }
+
+    private static void parseIpv6HexGroups(String hexPart, int targetHexGroups, int[] groups) {
+        int doubleColon = hexPart.indexOf("::");
+        if (doubleColon < 0) {
+            String[] all = hexPart.split(":", -1);
+            if (all.length != targetHexGroups) {
+                throw new IllegalArgumentException("Invalid IPv6 address");
+            }
+            for (int i = 0; i < all.length; i++) {
+                groups[i] = parseIpv6HexGroup(all[i]);
+            }
+            return;
+        }
+
+        String leftPart = hexPart.substring(0, doubleColon);
+        String rightPart = hexPart.substring(doubleColon + 2);
+        String[] left = leftPart.isEmpty() ? new String[0] : leftPart.split(":", -1);
+        String[] right = rightPart.isEmpty() ? new String[0] : rightPart.split(":", -1);
+        int zeroFill = targetHexGroups - left.length - right.length;
+        if (zeroFill < 1) {
+            throw new IllegalArgumentException("Invalid IPv6 address");
+        }
+        int index = 0;
+        for (String group : left) {
+            groups[index++] = parseIpv6HexGroup(group);
+        }
+        index += zeroFill;
+        for (String group : right) {
+            groups[index++] = parseIpv6HexGroup(group);
+        }
+    }
+
+    private static int parseIpv6HexGroup(String group) {
+        if (!IPV6_HEX_GROUP_PATTERN.matcher(group).matches()) {
+            throw new IllegalArgumentException("Invalid IPv6 address");
+        }
+        return Integer.parseInt(group, HEX_RADIX);
+    }
+
+    private static boolean isIpv4MappedIpv6(int[] groups) {
+        for (int i = 0; i < IPV4_MAPPED_PREFIX_ZERO_GROUPS; i++) {
+            if (groups[i] != 0) {
+                return false;
+            }
+        }
+        return groups[IPV4_MAPPED_PREFIX_ZERO_GROUPS] == IPV4_MAPPED_MARKER_GROUP;
+    }
+
+    private static String formatCanonicalIpv6(int[] groups) {
+        int bestStart = -1;
+        int bestLen = 0;
+        int curStart = -1;
+        int curLen = 0;
+        for (int i = 0; i < IPV6_GROUP_COUNT; i++) {
+            if (groups[i] == 0) {
+                if (curLen == 0) {
+                    curStart = i;
+                }
+                curLen++;
+                if (curLen > bestLen) {
+                    bestLen = curLen;
+                    bestStart = curStart;
+                }
+            } else {
+                curLen = 0;
+            }
+        }
+        if (bestLen < MIN_IPV6_COMPRESS_RUN) {
+            bestStart = -1;
+            bestLen = 0;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < IPV6_GROUP_COUNT; i++) {
+            if (i == bestStart) {
+                sb.append("::");
+                i += bestLen - 1;
+                continue;
+            }
+            if (i > 0 && i != bestStart + bestLen) {
+                sb.append(':');
+            }
+            sb.append(Integer.toHexString(groups[i]));
+        }
+        return sb.toString();
     }
 }

@@ -2,6 +2,7 @@ package ai.whitekey.service;
 
 import ai.whitekey.entity.HttpCredentialEntity;
 import ai.whitekey.entity.HttpCredentialTargetType;
+import ai.whitekey.policy.HttpPolicyValidator;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -79,14 +80,14 @@ public class CredentialInjectionService {
         if (configuredHost == null || targetHost == null) {
             return false;
         }
-        String cleanConfigured = configuredHost.trim().toLowerCase(Locale.ROOT);
-        String cleanTarget = targetHost.trim().toLowerCase(Locale.ROOT);
+        String cleanConfigured = HttpPolicyValidator.normalizeHostIfValid(configuredHost);
+        String cleanTarget = HttpPolicyValidator.normalizeHostIfValid(targetHost);
 
         if (cleanConfigured.equals(cleanTarget)) {
             return true;
         }
 
-        if (cleanConfigured.startsWith(WILDCARD_HOST_PREFIX)) {
+        if (cleanConfigured.startsWith(WILDCARD_HOST_PREFIX) && !HttpPolicyValidator.isIpAddress(cleanTarget)) {
             String domain = cleanConfigured.substring(WILDCARD_HOST_PREFIX.length());
             return cleanTarget.endsWith("." + domain) || cleanTarget.equals(domain);
         }

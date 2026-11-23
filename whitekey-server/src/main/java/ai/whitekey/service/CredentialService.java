@@ -9,6 +9,7 @@ import ai.whitekey.entity.CredentialEntity;
 import ai.whitekey.entity.HttpCredentialEntity;
 import ai.whitekey.entity.HttpCredentialTargetType;
 import ai.whitekey.exception.ResourceNotFoundException;
+import ai.whitekey.policy.HttpPolicyValidator;
 import ai.whitekey.repository.CredentialRepository;
 import ai.whitekey.repository.HttpCredentialRepository;
 import org.springframework.http.HttpHeaders;
@@ -57,10 +58,11 @@ public class CredentialService {
                         .orElseThrow(() -> new IllegalArgumentException("Unknown credential preset: " + request.preset()))
                 : null;
 
-        String host = firstNonBlank(request.host(), preset != null ? preset.defaultHost() : null, null);
-        if (host == null) {
+        String rawHost = firstNonBlank(request.host(), preset != null ? preset.defaultHost() : null, null);
+        if (rawHost == null) {
             throw new IllegalArgumentException("Target host is required");
         }
+        String host = HttpPolicyValidator.normalizeHostIfValid(rawHost);
         String rawType = firstNonBlank(
                 request.targetType(),
                 preset != null ? preset.targetType() : null,
