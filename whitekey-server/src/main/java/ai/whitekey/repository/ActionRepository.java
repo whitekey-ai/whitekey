@@ -35,7 +35,7 @@ public interface ActionRepository extends JpaRepository<ActionEntity, UUID> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(
             "UPDATE ActionEntity a SET a.status = :status "
-                    + "WHERE a.id = :id AND a.status = ai.whitekey.entity.ActionStatus.AWAITING_APPROVAL")
+                    + "WHERE a.id = :id AND a.status = ai.whitekey.entity.ActionStatus.PENDING")
     int resolvePending(
             @Param("id") UUID id,
             @Param("status") ActionStatus status);

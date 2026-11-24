@@ -3,6 +3,10 @@ package ai.whitekey.proxy;
 import ai.whitekey.config.ProxyProperties;
 import ai.whitekey.policy.HttpPolicyValidator;
 import ai.whitekey.service.SecretFileLoader;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
+import com.google.common.util.concurrent.UncheckedExecutionException;
 import io.netty.handler.ssl.ApplicationProtocolConfig;
 import io.netty.handler.ssl.ApplicationProtocolNames;
 import io.netty.handler.ssl.SslContext;
@@ -50,11 +54,7 @@ import java.security.cert.X509Certificate;
 import java.security.spec.ECGenParameterSpec;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Comparator;
 import java.util.Date;
-import java.util.Locale;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class ProxyCertificateAuthority {
@@ -70,12 +70,13 @@ public class ProxyCertificateAuthority {
     private static final Duration BACKDATE_SKEW = Duration.ofDays(1);
     private static final int MAX_CACHED_SSL_CONTEXTS = 512;
 
-    private record CachedSslContext(SslContext sslContext, Instant expiresAt) {}
-
     private final Path caCertPath;
     private final Path caKeyPath;
     private final SecureRandom secureRandom = new SecureRandom();
-    private final Map<String, CachedSslContext> sslContexts = new ConcurrentHashMap<>();
+    private final LoadingCache<String, SslContext> sslContexts = CacheBuilder.newBuilder()
+            .maximumSize(MAX_CACHED_SSL_CONTEXTS)
+            .expireAfterWrite(LEAF_VALIDITY.minus(LEAF_RENEW_WINDOW))
+            .build(CacheLoader.from(this::createLeafSslContext));
 
     private X509Certificate caCertificate;
     private PrivateKey caPrivateKey;
@@ -131,34 +132,13 @@ public class ProxyCertificateAuthority {
 
     public SslContext sslContextForHost(String host) {
         String normalized = HttpPolicyValidator.normalizeHostIfValid(host);
-        Instant renewThreshold = Instant.now().plus(LEAF_RENEW_WINDOW);
-        CachedSslContext cached = sslContexts.get(normalized);
-        if (cached != null && cached.expiresAt().isAfter(renewThreshold)) {
-            return cached.sslContext();
-        }
-        CachedSslContext updated = sslContexts.compute(normalized, (key, existing) -> {
-            if (existing != null && existing.expiresAt().isAfter(renewThreshold)) {
-                return existing;
+        try {
+            return sslContexts.getUnchecked(normalized);
+        } catch (UncheckedExecutionException e) {
+            if (e.getCause() instanceof RuntimeException re) {
+                throw re;
             }
-            return createLeafSslContext(key);
-        });
-        if (sslContexts.size() > MAX_CACHED_SSL_CONTEXTS) {
-            evictContexts(normalized, renewThreshold);
-        }
-        return updated.sslContext();
-    }
-
-    private void evictContexts(String keepHost, Instant renewThreshold) {
-        sslContexts.entrySet().removeIf(entry -> !entry.getValue().expiresAt().isAfter(renewThreshold));
-        int excess = sslContexts.size() - MAX_CACHED_SSL_CONTEXTS;
-        if (excess > 0) {
-            sslContexts.entrySet().stream()
-                    .filter(entry -> !entry.getKey().equals(keepHost))
-                    .sorted(Comparator.comparing(entry -> entry.getValue().expiresAt()))
-                    .limit(excess)
-                    .map(Map.Entry::getKey)
-                    .toList()
-                    .forEach(sslContexts::remove);
+            throw e;
         }
     }
 
@@ -224,7 +204,7 @@ public class ProxyCertificateAuthority {
         }
     }
 
-    private CachedSslContext createLeafSslContext(String host) {
+    private SslContext createLeafSslContext(String host) {
         try {
             KeyPair leafKeyPair = generateEcKeyPair();
             Instant now = Instant.now();
@@ -271,7 +251,7 @@ public class ProxyCertificateAuthority {
                             ApplicationProtocolConfig.SelectedListenerFailureBehavior.ACCEPT,
                             ApplicationProtocolNames.HTTP_1_1))
                     .build();
-            return new CachedSslContext(sslContext, notAfter);
+            return sslContext;
         } catch (Exception e) {
             throw new IllegalStateException("Failed creating TLS context for host " + host, e);
         }

@@ -81,8 +81,8 @@ public class ActionService {
                 queryParams,
                 safeHeaders,
                 safeBody,
+                truncated,
                 status);
-        entity.setBodyTruncated(truncated);
         return httpActionRepository.save(entity);
     }
 
@@ -126,7 +126,7 @@ public class ActionService {
 
     @Transactional(readOnly = true)
     public int countPendingApprovals() {
-        return (int) actionRepository.countByStatus(ActionStatus.AWAITING_APPROVAL);
+        return (int) actionRepository.countByStatus(ActionStatus.PENDING);
     }
 
     @Transactional
@@ -136,7 +136,7 @@ public class ActionService {
             throw new IllegalArgumentException("Only approval can save an allow rule");
         }
         ActionEntity action = getAction(id);
-        if (action.getStatus() != ActionStatus.AWAITING_APPROVAL) {
+        if (action.getStatus() != ActionStatus.PENDING) {
             throw new ConflictException(
                     "This action is no longer awaiting approval. Refresh and try again.");
         }
@@ -160,18 +160,15 @@ public class ActionService {
     }
 
     @Transactional
-    public void expirePendingAction(UUID id, ActionStatus status) {
-        if (status != ActionStatus.CANCELLED && status != ActionStatus.EXPIRED) {
-            throw new IllegalArgumentException("Expired or cancelled status is required");
-        }
-        if (actionRepository.resolvePending(id, status) > 0) {
+    public void cancelPendingAction(UUID id) {
+        if (actionRepository.resolvePending(id, ActionStatus.CANCELLED) > 0) {
             waitRegistry.notifyResolved(id);
         }
     }
 
     @Transactional
     public void clearFinished() {
-        String status = ActionStatus.AWAITING_APPROVAL.name();
+        String status = ActionStatus.PENDING.name();
         httpActionRepository.deleteByStatusNot(status);
         actionRepository.deleteByStatusNot(status);
     }

@@ -54,13 +54,13 @@ public class SetupService {
         setSetupMode(false);
 
         var currentRules = rules.getHttpRules();
-        var pending = actionRepository.findByStatusOrderByIdAsc(ActionStatus.AWAITING_APPROVAL, Pageable.unpaged());
+        var pending = actionRepository.findByStatusOrderByIdAsc(ActionStatus.PENDING, Pageable.unpaged());
         for (ActionEntity action : pending) {
             if (action instanceof HttpActionEntity http) {
                 var decision = engine.evaluateHttp(http, currentRules);
                 if (decision.isUnmatchedAction()
                         && decision.effect() != RuleEffect.ASK
-                        && actionRepository.resolvePending(http.getId(), ActionStatus.EXPIRED) > 0) {
+                        && actionRepository.resolvePending(http.getId(), ActionStatus.CANCELLED) > 0) {
                     waitRegistry.notifyResolved(http.getId());
                 }
             }

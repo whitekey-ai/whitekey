@@ -1,10 +1,8 @@
 package ai.whitekey.entity;
 
 public enum ActionStatus {
-    AWAITING_APPROVAL,
+    PENDING,
     ALLOWED,
     DENIED,
-    EXPIRED,
-    FAILED,
     CANCELLED
 }

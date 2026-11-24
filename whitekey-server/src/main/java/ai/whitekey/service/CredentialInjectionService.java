@@ -1,7 +1,6 @@
 package ai.whitekey.service;
 
-import ai.whitekey.entity.HttpCredentialEntity;
-import ai.whitekey.entity.HttpCredentialTargetType;
+import ai.whitekey.entity.HttpInjectionEntity;
 import ai.whitekey.policy.HttpPolicyValidator;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
@@ -39,7 +38,7 @@ public class CredentialInjectionService {
             return new InjectedTarget(targetUri, requestHeaders);
         }
 
-        List<HttpCredentialEntity> matches = findMatchingCredentials(host);
+        List<HttpInjectionEntity> matches = findMatchingInjections(host);
         if (matches.isEmpty()) {
             return new InjectedTarget(targetUri, requestHeaders);
         }
@@ -51,27 +50,27 @@ public class CredentialInjectionService {
 
         URI currentUri = targetUri;
 
-        for (HttpCredentialEntity cred : matches) {
-            String rawSecret = encryptionService.decrypt(cred.getEncryptedSecret());
+        for (HttpInjectionEntity injection : matches) {
+            String rawSecret = encryptionService.decrypt(injection.getCredential().getEncryptedSecret());
             if (rawSecret == null || rawSecret.isBlank()) {
                 continue;
             }
 
-            String formatted = formatValue(cred.getFormatTemplate(), rawSecret);
+            String formatted = formatValue(injection.getFormat(), rawSecret);
 
-            switch (cred.getTargetType()) {
-                case HEADER -> modifiedHeaders.set(cred.getTargetKey(), formatted);
-                case COOKIE -> injectCookie(modifiedHeaders, cred.getTargetKey(), formatted);
-                case QUERY -> currentUri = injectQueryParam(currentUri, cred.getTargetKey(), formatted);
+            switch (injection.getInjectionTarget()) {
+                case HEADER -> modifiedHeaders.set(injection.getKey(), formatted);
+                case COOKIE -> injectCookie(modifiedHeaders, injection.getKey(), formatted);
+                case QUERY -> currentUri = injectQueryParam(currentUri, injection.getKey(), formatted);
             }
         }
 
         return new InjectedTarget(currentUri, modifiedHeaders);
     }
 
-    private List<HttpCredentialEntity> findMatchingCredentials(String host) {
+    private List<HttpInjectionEntity> findMatchingInjections(String host) {
         String lowerHost = host.toLowerCase(Locale.ROOT);
-        return credentialService.getActiveHttpCredentials().stream()
+        return credentialService.getActiveHttpInjections().stream()
                 .filter(c -> matchesHost(lowerHost, c.getHost()))
                 .toList();
     }

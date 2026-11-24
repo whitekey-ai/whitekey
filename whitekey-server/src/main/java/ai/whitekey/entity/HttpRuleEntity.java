@@ -1,6 +1,5 @@
 package ai.whitekey.entity;
 
-import ai.whitekey.api.dto.ProtocolConstants;
 import ai.whitekey.api.dto.RuleEffect;
 import ai.whitekey.converter.HttpHeadersConverter;
 import ai.whitekey.converter.HttpMethodListConverter;
@@ -16,6 +15,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,53 +64,53 @@ public class HttpRuleEntity extends RuleEntity {
             HttpHeaders headers,
             String bodyCondition) {
         super(name, effect);
-        this.methods = methods != null ? new ArrayList<>(methods) : new ArrayList<>();
-        this.hosts = hosts != null ? new ArrayList<>(hosts) : new ArrayList<>();
-        this.ports = ports != null ? new ArrayList<>(ports) : new ArrayList<>();
-        this.paths = paths != null ? new ArrayList<>(paths) : new ArrayList<>();
-        this.queryParams = queryParams != null ? new LinkedHashMap<>(queryParams) : new LinkedHashMap<>();
-        this.headers = headers != null ? HttpHeaders.readOnlyHttpHeaders(headers) : HttpHeaders.EMPTY;
-        this.bodyCondition = (bodyCondition != null && !bodyCondition.isBlank()) ? bodyCondition.trim() : null;
+        this.methods = copyList(methods);
+        this.hosts = copyList(hosts);
+        this.ports = copyList(ports);
+        this.paths = copyList(paths);
+        this.queryParams = copyMap(queryParams);
+        this.headers = readOnlyHeaders(headers);
+        this.bodyCondition = normalizeCondition(bodyCondition);
     }
 
     public List<HttpMethod> getMethods() {
-        return methods;
+        return Collections.unmodifiableList(methods);
     }
 
     public void setMethods(List<HttpMethod> methods) {
-        this.methods = methods != null ? new ArrayList<>(methods) : new ArrayList<>();
+        this.methods = copyList(methods);
     }
 
     public List<String> getHosts() {
-        return hosts;
+        return Collections.unmodifiableList(hosts);
     }
 
     public void setHosts(List<String> hosts) {
-        this.hosts = hosts != null ? new ArrayList<>(hosts) : new ArrayList<>();
+        this.hosts = copyList(hosts);
     }
 
     public List<Integer> getPorts() {
-        return ports;
+        return Collections.unmodifiableList(ports);
     }
 
     public void setPorts(List<Integer> ports) {
-        this.ports = ports != null ? new ArrayList<>(ports) : new ArrayList<>();
+        this.ports = copyList(ports);
     }
 
     public List<String> getPaths() {
-        return paths;
+        return Collections.unmodifiableList(paths);
     }
 
     public void setPaths(List<String> paths) {
-        this.paths = paths != null ? new ArrayList<>(paths) : new ArrayList<>();
+        this.paths = copyList(paths);
     }
 
     public Map<String, List<String>> getQueryParams() {
-        return queryParams;
+        return Collections.unmodifiableMap(queryParams);
     }
 
     public void setQueryParams(Map<String, List<String>> queryParams) {
-        this.queryParams = queryParams != null ? new LinkedHashMap<>(queryParams) : new LinkedHashMap<>();
+        this.queryParams = copyMap(queryParams);
     }
 
     public HttpHeaders getHeaders() {
@@ -118,7 +118,7 @@ public class HttpRuleEntity extends RuleEntity {
     }
 
     public void setHeaders(HttpHeaders headers) {
-        this.headers = headers != null ? HttpHeaders.readOnlyHttpHeaders(headers) : HttpHeaders.EMPTY;
+        this.headers = readOnlyHeaders(headers);
     }
 
     public String getBodyCondition() {
@@ -126,11 +126,22 @@ public class HttpRuleEntity extends RuleEntity {
     }
 
     public void setBodyCondition(String bodyCondition) {
-        this.bodyCondition = (bodyCondition != null && !bodyCondition.isBlank()) ? bodyCondition.trim() : null;
+        this.bodyCondition = normalizeCondition(bodyCondition);
     }
 
-    @Override
-    public String getType() {
-        return ProtocolConstants.HTTP;
+    private static <T> List<T> copyList(List<T> items) {
+        return items != null ? new ArrayList<>(items) : new ArrayList<>();
+    }
+
+    private static Map<String, List<String>> copyMap(Map<String, List<String>> map) {
+        return map != null ? new LinkedHashMap<>(map) : new LinkedHashMap<>();
+    }
+
+    private static HttpHeaders readOnlyHeaders(HttpHeaders headers) {
+        return headers != null ? HttpHeaders.readOnlyHttpHeaders(headers) : HttpHeaders.EMPTY;
+    }
+
+    private static String normalizeCondition(String bodyCondition) {
+        return (bodyCondition != null && !bodyCondition.isBlank()) ? bodyCondition.trim() : null;
     }
 }

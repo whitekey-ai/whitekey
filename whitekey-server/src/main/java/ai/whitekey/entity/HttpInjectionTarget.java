@@ -1,6 +1,6 @@
 package ai.whitekey.entity;
 
-public enum HttpCredentialTargetType {
+public enum HttpInjectionTarget {
     HEADER,
     QUERY,
     COOKIE

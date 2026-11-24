@@ -20,7 +20,7 @@ import java.util.Locale;
         })
 public class CredentialCommand extends BaseCommand {
 
-    public static final String DEFAULT_TARGET_TYPE = "HEADER";
+    public static final String DEFAULT_INJECTION_TARGET = "HEADER";
     public static final String WILDCARD_HOST = "*";
 
     @Command(name = "list", description = "List configured credentials (secrets masked)")
@@ -39,8 +39,8 @@ public class CredentialCommand extends BaseCommand {
                     System.out.printf("%s  %s  %s:%s  %s%n",
                             hc.name(),
                             hc.host() != null ? hc.host() : WILDCARD_HOST,
-                            hc.targetType() != null ? hc.targetType() : DEFAULT_TARGET_TYPE,
-                            hc.targetKey() != null ? hc.targetKey() : "-",
+                            hc.injectionTarget() != null ? hc.injectionTarget() : DEFAULT_INJECTION_TARGET,
+                            hc.key() != null ? hc.key() : "-",
                             hc.maskedSecret() != null ? hc.maskedSecret() : "");
                 } else {
                     System.out.printf("%s  [%s]  %s%n",
@@ -82,8 +82,8 @@ public class CredentialCommand extends BaseCommand {
         @Option(names = "--host", description = "Target host (e.g. api.github.com, *.slack.com)")
         private String host;
 
-        @Option(names = "--type", description = "Target type: HEADER, QUERY, or COOKIE (default: HEADER or preset default)")
-        private String targetType;
+        @Option(names = "--injection-target", description = "Injection target: HEADER, QUERY, or COOKIE (default: HEADER or preset default)")
+        private String injectionTarget;
 
         @Option(names = "--key", description = "Header, query, or cookie name")
         private String key;
@@ -97,7 +97,7 @@ public class CredentialCommand extends BaseCommand {
                     name,
                     preset,
                     host,
-                    targetType != null ? targetType.toUpperCase(Locale.ROOT) : null,
+                    injectionTarget != null ? injectionTarget.toUpperCase(Locale.ROOT) : null,
                     key,
                     format,
                     secret);

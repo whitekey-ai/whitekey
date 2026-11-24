@@ -8,9 +8,9 @@ public record HttpCredential(
         String name,
         String type,
         String host,
-        String targetType,
-        String targetKey,
-        String formatTemplate,
+        String injectionTarget,
+        String key,
+        String format,
         String maskedSecret
 ) implements Credential {
     public HttpCredential {
@@ -23,10 +23,10 @@ public record HttpCredential(
             String id,
             String name,
             String host,
-            String targetType,
-            String targetKey,
-            String formatTemplate,
+            String injectionTarget,
+            String key,
+            String format,
             String maskedSecret) {
-        this(id, name, ProtocolConstants.HTTP, host, targetType, targetKey, formatTemplate, maskedSecret);
+        this(id, name, ProtocolConstants.HTTP, host, injectionTarget, key, format, maskedSecret);
     }
 }

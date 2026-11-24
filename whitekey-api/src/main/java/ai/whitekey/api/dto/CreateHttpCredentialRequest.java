@@ -8,9 +8,9 @@ public record CreateHttpCredentialRequest(
         String type,
         String preset,
         String host,
-        String targetType,
-        String targetKey,
-        String formatTemplate,
+        String injectionTarget,
+        String key,
+        String format,
         String secret
 ) implements CreateCredentialRequest {
     public CreateHttpCredentialRequest {
@@ -23,10 +23,10 @@ public record CreateHttpCredentialRequest(
             String name,
             String preset,
             String host,
-            String targetType,
-            String targetKey,
-            String formatTemplate,
+            String injectionTarget,
+            String key,
+            String format,
             String secret) {
-        this(name, ProtocolConstants.HTTP, preset, host, targetType, targetKey, formatTemplate, secret);
+        this(name, ProtocolConstants.HTTP, preset, host, injectionTarget, key, format, secret);
     }
 }

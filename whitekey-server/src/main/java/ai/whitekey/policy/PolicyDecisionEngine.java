@@ -13,20 +13,23 @@ import org.springframework.stereotype.Component;
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.function.BooleanSupplier;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 @Component
 public final class PolicyDecisionEngine {
-    public static final String NO_MATCHING_RULE_REASON = "No applicable rule allows this action";
-    public static final String NO_MATCHING_RULE_ALLOW_REASON = "No matching rule; allowed by default policy";
-    public static final String NO_MATCHING_RULE_APPROVAL_REASON = "No matching rule; requires human approval by default policy";
     public static final String RULE_DENIED_REASON = "A matching rule explicitly denies this action";
-    public static final String RULE_REQUIRES_APPROVAL_REASON = "A matching rule requires human approval";
-    public static final String RULE_ALLOWED_REASON = "Matching rules allow this action";
-    public static final String INVALID_BODY_REASON = "Request body is not valid JSON or contains duplicate keys";
+    private static final String NO_MATCHING_RULE_REASON = "No applicable rule allows this action";
+    private static final String NO_MATCHING_RULE_ALLOW_REASON = "No matching rule; allowed by default policy";
+    private static final String NO_MATCHING_RULE_APPROVAL_REASON = "No matching rule; requires human approval by default policy";
+    private static final String RULE_REQUIRES_APPROVAL_REASON = "A matching rule requires human approval";
+    private static final String RULE_ALLOWED_REASON = "Matching rules allow this action";
+    private static final String INVALID_BODY_REASON = "Request body is not valid JSON or contains duplicate keys";
 
     private final CelBodyEvaluator bodyEvaluator;
     private final RuleEffect defaultEffect;
@@ -84,46 +87,40 @@ public final class PolicyDecisionEngine {
         }
     }
 
-    private record HeaderMatchResult(List<HttpRuleEntity> matched, Decision invalidRuleError) {}
-
     public HeaderEvaluation evaluateHeaders(
             HttpMethod method,
             URI url,
             HttpHeaders headers,
             List<HttpRuleEntity> rules) {
-        HeaderMatchResult headerMatch = collectHeaderMatches(RequestMetadata.from(method, url, headers), rules);
-        if (headerMatch.invalidRuleError() != null) {
-            return new HeaderEvaluation(false, headerMatch.invalidRuleError());
+        RequestMetadata req = RequestMetadata.from(method, url, headers);
+        if (req == null) {
+            return new HeaderEvaluation(false, unmatchedDecision());
         }
-
-        List<HttpRuleEntity> headerMatched = headerMatch.matched();
-        if (headerMatched.stream().anyMatch(r -> r.getEffect() == RuleEffect.DENY && !hasBodyCondition(r))) {
-            return new HeaderEvaluation(false, new Decision(RuleEffect.DENY, RULE_DENIED_REASON));
+        List<HttpRuleEntity> headerMatched = collectHeaderMatches(req, rules);
+        boolean needsBody = false;
+        for (HttpRuleEntity rule : headerMatched) {
+            if (hasBodyCondition(rule)) {
+                needsBody = true;
+            } else if (rule.getEffect() == RuleEffect.DENY) {
+                return new HeaderEvaluation(false, new Decision(RuleEffect.DENY, RULE_DENIED_REASON));
+            }
         }
-        if (headerMatched.stream().anyMatch(PolicyDecisionEngine::hasBodyCondition)) {
+        if (needsBody) {
             return new HeaderEvaluation(true, null);
         }
-        return new HeaderEvaluation(false, resolveDecision(headerMatched));
+        return new HeaderEvaluation(false, resolveDecision(headerMatched, rule -> true));
     }
 
     public Decision evaluateHttp(HttpActionEntity action, List<HttpRuleEntity> rules) {
-        HeaderMatchResult headerMatch = collectHeaderMatches(RequestMetadata.from(action), rules);
-        if (headerMatch.invalidRuleError() != null) {
-            return headerMatch.invalidRuleError();
+        RequestMetadata req = RequestMetadata.from(action);
+        if (req == null) {
+            return unmatchedDecision();
         }
-
-        List<HttpRuleEntity> headerMatched = headerMatch.matched();
-        if (action != null && action.isBodyTruncated()) {
-            List<HttpRuleEntity> nonBodyRules = headerMatched.stream()
-                    .filter(rule -> !hasBodyCondition(rule))
-                    .toList();
-            return resolveDecision(nonBodyRules);
+        List<HttpRuleEntity> headerMatched = collectHeaderMatches(req, rules);
+        if (action.isBodyTruncated()) {
+            return resolveDecision(headerMatched, rule -> !hasBodyCondition(rule));
         }
-
-        return evaluateBodyRules(
-                headerMatched,
-                () -> action == null || bodyEvaluator.isValidJson(action.getBody()),
-                rule -> bodyEvaluator.matches(rule.getBodyCondition(), action != null ? action.getBody() : null));
+        return evaluateBodyRules(headerMatched, expressions -> bodyEvaluator.evaluateAll(expressions, action.getBody()));
     }
 
     public Decision evaluateWithBodyFile(
@@ -132,67 +129,79 @@ public final class PolicyDecisionEngine {
             HttpHeaders headers,
             Path bodyFile,
             List<HttpRuleEntity> rules) {
-        HeaderMatchResult headerMatch = collectHeaderMatches(RequestMetadata.from(method, url, headers), rules);
-        if (headerMatch.invalidRuleError() != null) {
-            return headerMatch.invalidRuleError();
+        RequestMetadata req = RequestMetadata.from(method, url, headers);
+        if (req == null) {
+            return unmatchedDecision();
         }
-
-        return evaluateBodyRules(
-                headerMatch.matched(),
-                () -> bodyEvaluator.isValidJson(bodyFile),
-                rule -> bodyEvaluator.matches(rule.getBodyCondition(), bodyFile));
-    }
-
-    private static HeaderMatchResult collectHeaderMatches(RequestMetadata req, List<HttpRuleEntity> rules) {
-        List<HttpRuleEntity> matched = new ArrayList<>();
-        for (HttpRuleEntity rule : rules) {
-            if (rule.getEffect() == null) {
-                return new HeaderMatchResult(
-                        List.of(),
-                        new Decision(
-                                RuleEffect.DENY,
-                                "Invalid applicable rule " + rule.getId() + ": " + RuleEffect.ERROR_EFFECT_REQUIRED));
-            }
-            if (req != null && matchesRequestMetadata(req, rule)) {
-                matched.add(rule);
-            }
-        }
-        return new HeaderMatchResult(matched, null);
+        List<HttpRuleEntity> headerMatched = collectHeaderMatches(req, rules);
+        return evaluateBodyRules(headerMatched, expressions -> bodyEvaluator.evaluateAll(expressions, bodyFile));
     }
 
     private Decision evaluateBodyRules(
             List<HttpRuleEntity> headerMatched,
-            BooleanSupplier validJson,
-            Predicate<HttpRuleEntity> bodyMatcher) {
-        boolean hasMatchingBodyRule = headerMatched.stream().anyMatch(PolicyDecisionEngine::hasBodyCondition);
-        if (hasMatchingBodyRule && !validJson.getAsBoolean()) {
+            Function<List<String>, CelBodyEvaluator.BatchResult> evaluator) {
+        Set<String> expressions = new LinkedHashSet<>();
+        for (HttpRuleEntity rule : headerMatched) {
+            if (hasBodyCondition(rule)) {
+                expressions.add(rule.getBodyCondition());
+            } else if (rule.getEffect() == RuleEffect.DENY) {
+                return new Decision(RuleEffect.DENY, RULE_DENIED_REASON);
+            }
+        }
+        if (expressions.isEmpty()) {
+            return resolveDecision(headerMatched, rule -> true);
+        }
+        CelBodyEvaluator.BatchResult batch = evaluator.apply(List.copyOf(expressions));
+        if (!batch.validJson()) {
             return new Decision(RuleEffect.DENY, INVALID_BODY_REASON);
         }
-        List<HttpRuleEntity> matched = headerMatched.stream()
-                .filter(rule -> !hasBodyCondition(rule) || bodyMatcher.test(rule))
-                .toList();
-        return resolveDecision(matched);
+        return resolveDecision(
+                headerMatched,
+                rule -> !hasBodyCondition(rule) || batch.matchedExpressions().contains(rule.getBodyCondition()));
     }
 
-    private Decision resolveDecision(List<HttpRuleEntity> matched) {
-        if (matched.stream().anyMatch(rule -> rule.getEffect() == RuleEffect.DENY)) {
-            return new Decision(RuleEffect.DENY, RULE_DENIED_REASON);
+    private static List<HttpRuleEntity> collectHeaderMatches(RequestMetadata req, List<HttpRuleEntity> rules) {
+        List<HttpRuleEntity> matched = new ArrayList<>();
+        for (HttpRuleEntity rule : rules) {
+            Objects.requireNonNull(rule.getEffect(), RuleEffect.ERROR_EFFECT_REQUIRED);
+            if (matchesRequestMetadata(req, rule)) {
+                matched.add(rule);
+            }
         }
-        if (matched.stream().anyMatch(rule -> rule.getEffect() == RuleEffect.ASK)) {
+        return matched;
+    }
+
+    private Decision resolveDecision(List<HttpRuleEntity> matched, Predicate<HttpRuleEntity> include) {
+        boolean hasAsk = false;
+        boolean hasMatch = false;
+        for (HttpRuleEntity rule : matched) {
+            if (!include.test(rule)) {
+                continue;
+            }
+            hasMatch = true;
+            if (rule.getEffect() == RuleEffect.DENY) {
+                return new Decision(RuleEffect.DENY, RULE_DENIED_REASON);
+            }
+            if (rule.getEffect() == RuleEffect.ASK) {
+                hasAsk = true;
+            }
+        }
+        if (hasAsk) {
             return new Decision(RuleEffect.ASK, RULE_REQUIRES_APPROVAL_REASON);
         }
-        if (!matched.isEmpty()) {
+        if (hasMatch) {
             return new Decision(RuleEffect.ALLOW, RULE_ALLOWED_REASON);
         }
-        return new Decision(defaultEffect, unmatchedReason(defaultEffect), true);
+        return unmatchedDecision();
     }
 
-    private static String unmatchedReason(RuleEffect effect) {
-        return switch (effect) {
+    private Decision unmatchedDecision() {
+        String reason = switch (defaultEffect) {
             case ALLOW -> NO_MATCHING_RULE_ALLOW_REASON;
             case ASK -> NO_MATCHING_RULE_APPROVAL_REASON;
             case DENY -> NO_MATCHING_RULE_REASON;
         };
+        return new Decision(defaultEffect, reason, true);
     }
 
     private static boolean hasBodyCondition(HttpRuleEntity rule) {
@@ -200,21 +209,17 @@ public final class PolicyDecisionEngine {
     }
 
     private static boolean matchesRequestMetadata(RequestMetadata req, HttpRuleEntity rule) {
-        if (rule.getMethods() != null && !rule.getMethods().isEmpty() && !rule.getMethods().contains(req.method())) {
-            return false;
-        }
-        if (rule.getHosts() != null && !rule.getHosts().isEmpty() && !rule.getHosts().contains(req.host())) {
-            return false;
-        }
-        if (rule.getPorts() != null && !rule.getPorts().isEmpty() && !rule.getPorts().contains(req.port())) {
-            return false;
-        }
-        if (rule.getPaths() != null && !rule.getPaths().isEmpty()
-                && rule.getPaths().stream().noneMatch(pattern -> matchesPath(pattern, req.path()))) {
-            return false;
-        }
-        return matchesQueryParams(rule.getQueryParams(), req.queryParams(), rule.getEffect())
+        return matchesAny(rule.getMethods(), req.method())
+                && matchesAny(rule.getHosts(), req.host())
+                && matchesAny(rule.getPorts(), req.port())
+                && (rule.getPaths() == null || rule.getPaths().isEmpty()
+                        || rule.getPaths().stream().anyMatch(pattern -> matchesPath(pattern, req.path())))
+                && matchesQueryParams(rule.getQueryParams(), req.queryParams(), rule.getEffect())
                 && matchesRuleHeaders(rule.getHeaders(), req.headers(), rule.getEffect());
+    }
+
+    private static <T> boolean matchesAny(List<T> allowed, T actual) {
+        return allowed == null || allowed.isEmpty() || allowed.contains(actual);
     }
 
     private static boolean matchesQueryParams(

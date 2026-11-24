@@ -18,15 +18,10 @@ public class SetupStateEntity {
     @Column(name = "setup_mode", nullable = false)
     private boolean setupMode = false;
 
-    public SetupStateEntity() {}
+    protected SetupStateEntity() {}
 
     public SetupStateEntity(boolean setupMode) {
-        this.id = GLOBAL_ID;
         this.setupMode = setupMode;
-    }
-
-    public Integer getId() {
-        return id;
     }
 
     public boolean isSetupMode() {

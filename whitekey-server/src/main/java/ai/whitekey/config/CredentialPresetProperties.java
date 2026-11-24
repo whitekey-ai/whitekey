@@ -1,6 +1,6 @@
 package ai.whitekey.config;
 
-import ai.whitekey.entity.HttpCredentialTargetType;
+import ai.whitekey.entity.HttpInjectionTarget;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.List;
@@ -16,9 +16,9 @@ public record CredentialPresetProperties(List<PresetDefinition> presets) {
             String id,
             String displayName,
             String defaultHost,
-            HttpCredentialTargetType targetType,
-            String targetKey,
-            String formatTemplate,
+            HttpInjectionTarget injectionTarget,
+            String key,
+            String format,
             String description
     ) {}
 }

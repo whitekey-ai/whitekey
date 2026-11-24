@@ -1,6 +1,5 @@
 package ai.whitekey.entity;
 
-import ai.whitekey.api.dto.ProtocolConstants;
 import ai.whitekey.converter.HttpHeadersConverter;
 import ai.whitekey.converter.HttpMethodConverter;
 
@@ -22,7 +21,7 @@ import java.util.Map;
 @Entity
 @Table(
         name = "http_action",
-        indexes = {@Index(name = "http_action_host", columnList = "host")})
+        indexes = {@Index(name = "idx_http_action_host", columnList = "host")})
 public class HttpActionEntity extends ActionEntity {
 
     @Convert(converter = HttpMethodConverter.class)
@@ -66,6 +65,7 @@ public class HttpActionEntity extends ActionEntity {
             Map<String, List<String>> queryParams,
             HttpHeaders headers,
             byte[] body,
+            boolean bodyTruncated,
             ActionStatus status
     ) {
         super(status);
@@ -75,84 +75,44 @@ public class HttpActionEntity extends ActionEntity {
         this.port = port;
         this.path = path;
         this.queryParams = queryParams != null ? queryParams : Collections.emptyMap();
-        this.headers = headers != null ? headers : HttpHeaders.EMPTY;
+        this.headers = headers != null ? HttpHeaders.readOnlyHttpHeaders(headers) : HttpHeaders.EMPTY;
         this.body = body != null ? body : new byte[0];
+        this.bodyTruncated = bodyTruncated;
     }
 
     public HttpMethod getMethod() {
         return method;
     }
 
-    public void setMethod(HttpMethod method) {
-        this.method = method;
-    }
-
     public String getUri() {
         return uri;
-    }
-
-    public void setUri(String uri) {
-        this.uri = uri;
     }
 
     public String getHost() {
         return host;
     }
 
-    public void setHost(String host) {
-        this.host = host;
-    }
-
     public int getPort() {
         return port;
-    }
-
-    public void setPort(int port) {
-        this.port = port;
     }
 
     public String getPath() {
         return path;
     }
 
-    public void setPath(String path) {
-        this.path = path;
-    }
-
     public Map<String, List<String>> getQueryParams() {
-        return queryParams;
-    }
-
-    public void setQueryParams(Map<String, List<String>> queryParams) {
-        this.queryParams = queryParams != null ? queryParams : Collections.emptyMap();
+        return Collections.unmodifiableMap(queryParams);
     }
 
     public HttpHeaders getHeaders() {
         return headers;
     }
 
-    public void setHeaders(HttpHeaders headers) {
-        this.headers = headers != null ? headers : HttpHeaders.EMPTY;
-    }
-
     public byte[] getBody() {
         return body;
     }
 
-    public void setBody(byte[] body) {
-        this.body = body != null ? body : new byte[0];
-    }
-
     public boolean isBodyTruncated() {
         return bodyTruncated;
-    }
-
-    public void setBodyTruncated(boolean bodyTruncated) {
-        this.bodyTruncated = bodyTruncated;
-    }
-
-    @Override
-    public String getType() {
-        return ProtocolConstants.HTTP;
     }
 }

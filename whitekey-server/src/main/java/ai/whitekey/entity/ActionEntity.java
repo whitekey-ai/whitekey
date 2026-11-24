@@ -18,7 +18,7 @@ import java.util.UUID;
 @Entity
 @Table(
         name = "action",
-        indexes = {@Index(name = "action_status_id", columnList = "status,id")})
+        indexes = {@Index(name = "idx_action_status_id", columnList = "status,id")})
 @Inheritance(strategy = InheritanceType.JOINED)
 public abstract class ActionEntity {
 
@@ -48,6 +48,4 @@ public abstract class ActionEntity {
     public void setStatus(ActionStatus status) {
         this.status = status;
     }
-
-    public abstract String getType();
 }

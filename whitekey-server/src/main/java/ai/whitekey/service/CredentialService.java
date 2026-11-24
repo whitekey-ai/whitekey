@@ -5,13 +5,16 @@ import ai.whitekey.api.dto.CreateHttpCredentialRequest;
 import ai.whitekey.api.dto.Credential;
 import ai.whitekey.api.dto.CredentialPreset;
 import ai.whitekey.api.dto.HttpCredential;
+import ai.whitekey.config.CacheConfig;
 import ai.whitekey.entity.CredentialEntity;
-import ai.whitekey.entity.HttpCredentialEntity;
-import ai.whitekey.entity.HttpCredentialTargetType;
+import ai.whitekey.entity.HttpInjectionEntity;
+import ai.whitekey.entity.HttpInjectionTarget;
 import ai.whitekey.exception.ResourceNotFoundException;
 import ai.whitekey.policy.HttpPolicyValidator;
 import ai.whitekey.repository.CredentialRepository;
-import ai.whitekey.repository.HttpCredentialRepository;
+import ai.whitekey.repository.HttpInjectionRepository;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,23 +31,23 @@ public class CredentialService {
     public static final String MASK_ELLIPSIS = "...";
 
     private final CredentialRepository repository;
-    private final HttpCredentialRepository httpCredentialRepository;
+    private final HttpInjectionRepository httpInjectionRepository;
     private final EncryptionService encryptionService;
     private final CredentialPresetService presetService;
-    private final TransactionalListCache<HttpCredentialEntity> credentialCache = new TransactionalListCache<>();
 
     public CredentialService(
             CredentialRepository repository,
-            HttpCredentialRepository httpCredentialRepository,
+            HttpInjectionRepository httpInjectionRepository,
             EncryptionService encryptionService,
             CredentialPresetService presetService) {
         this.repository = repository;
-        this.httpCredentialRepository = httpCredentialRepository;
+        this.httpInjectionRepository = httpInjectionRepository;
         this.encryptionService = encryptionService;
         this.presetService = presetService;
     }
 
     @Transactional
+    @CacheEvict(cacheNames = CacheConfig.HTTP_INJECTIONS, allEntries = true)
     public Credential create(CreateCredentialRequest request) {
         if (request instanceof CreateHttpCredentialRequest httpReq) {
             return createHttpCredential(httpReq);
@@ -63,40 +66,46 @@ public class CredentialService {
             throw new IllegalArgumentException("Target host is required");
         }
         String host = HttpPolicyValidator.normalizeHostIfValid(rawHost);
-        String rawType = firstNonBlank(
-                request.targetType(),
-                preset != null ? preset.targetType() : null,
-                HttpCredentialTargetType.HEADER.name());
-        HttpCredentialTargetType targetType;
+        String rawInjectionTarget = firstNonBlank(
+                request.injectionTarget(),
+                preset != null ? preset.injectionTarget() : null,
+                HttpInjectionTarget.HEADER.name());
+        HttpInjectionTarget injectionTarget;
         try {
-            targetType = HttpCredentialTargetType.valueOf(rawType.toUpperCase(Locale.ROOT));
+            injectionTarget = HttpInjectionTarget.valueOf(rawInjectionTarget.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException(
-                    "Invalid credential target type: " + rawType + " (expected HEADER, QUERY, or COOKIE)");
+                    "Invalid injection target: " + rawInjectionTarget + " (expected HEADER, QUERY, or COOKIE)");
         }
-        String targetKey = firstNonBlank(request.targetKey(), preset != null ? preset.targetKey() : null, HttpHeaders.AUTHORIZATION);
-        String formatTemplate = firstNonBlank(request.formatTemplate(), preset != null ? preset.formatTemplate() : null, "%s");
+        String key = firstNonBlank(request.key(), preset != null ? preset.key() : null, HttpHeaders.AUTHORIZATION);
+        String format = firstNonBlank(
+                request.format(),
+                preset != null ? preset.format() : null,
+                HttpInjectionEntity.DEFAULT_FORMAT);
         String name = requireNonBlank(request.name(), "Credential name is required");
         String rawSecret = requireNonBlank(request.secret(), "Credential secret is required");
         String encrypted = encryptionService.encrypt(rawSecret);
 
-        HttpCredentialEntity entity = repository.findByName(name)
+        CredentialEntity credential = repository.findByName(name)
                 .map(existing -> {
-                    if (existing instanceof HttpCredentialEntity httpEntity) {
-                        httpEntity.setHost(host);
-                        httpEntity.setTargetType(targetType);
-                        httpEntity.setTargetKey(targetKey);
-                        httpEntity.setFormatTemplate(formatTemplate);
-                        httpEntity.setEncryptedSecret(encrypted);
-                        return httpEntity;
-                    }
-                    throw new IllegalStateException("Existing credential " + name + " is not an HTTP credential");
+                    existing.setEncryptedSecret(encrypted);
+                    return existing;
                 })
-                .orElseGet(() -> new HttpCredentialEntity(name, host, targetType, targetKey, formatTemplate, encrypted));
+                .orElseGet(() -> new CredentialEntity(name, encrypted));
+        CredentialEntity savedCredential = repository.save(credential);
 
-        HttpCredentialEntity saved = httpCredentialRepository.save(entity);
-        invalidateCache();
-        return toDto(saved, rawSecret);
+        HttpInjectionEntity injection = httpInjectionRepository.findByCredentialId(savedCredential.getId())
+                .map(existing -> {
+                    existing.setHost(host);
+                    existing.setInjectionTarget(injectionTarget);
+                    existing.setKey(key);
+                    existing.setFormat(format);
+                    return existing;
+                })
+                .orElseGet(() -> new HttpInjectionEntity(savedCredential, host, injectionTarget, key, format));
+
+        HttpInjectionEntity savedInjection = httpInjectionRepository.save(injection);
+        return toDto(savedInjection, rawSecret);
     }
 
     private static String requireNonBlank(String value, String message) {
@@ -116,58 +125,54 @@ public class CredentialService {
         return defaultValue;
     }
 
-    public void invalidateCache() {
-        this.credentialCache.invalidateAfterCommit();
-    }
-
     @Transactional(readOnly = true)
-    public List<HttpCredentialEntity> getActiveHttpCredentials() {
-        return credentialCache.getOrLoad(httpCredentialRepository::findAll);
+    @Cacheable(CacheConfig.HTTP_INJECTIONS)
+    public List<HttpInjectionEntity> getActiveHttpInjections() {
+        return List.copyOf(httpInjectionRepository.findAllWithCredential());
     }
 
     @Transactional(readOnly = true)
     public List<Credential> list() {
-        return repository.findAll().stream()
+        return httpInjectionRepository.findAllWithCredential().stream()
                 .map(this::toDto)
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public Credential getByName(String name) {
-        CredentialEntity entity = repository.findByName(name)
+        HttpInjectionEntity injection = httpInjectionRepository.findByCredentialName(name)
                 .orElseThrow(() -> ResourceNotFoundException.forCredential(name));
-        return toDto(entity);
+        return toDto(injection);
     }
 
     @Transactional
+    @CacheEvict(cacheNames = CacheConfig.HTTP_INJECTIONS, allEntries = true)
     public void deleteByName(String name) {
         CredentialEntity entity = repository.findByName(name)
                 .orElseThrow(() -> ResourceNotFoundException.forCredential(name));
+        httpInjectionRepository.deleteByCredentialId(entity.getId());
         repository.delete(entity);
-        invalidateCache();
     }
 
-    private Credential toDto(CredentialEntity entity) {
+    private Credential toDto(HttpInjectionEntity injection) {
         String decrypted = null;
         try {
-            decrypted = encryptionService.decrypt(entity.getEncryptedSecret());
+            decrypted = encryptionService.decrypt(injection.getCredential().getEncryptedSecret());
         } catch (Exception ignored) {
         }
-        return toDto(entity, decrypted);
+        return toDto(injection, decrypted);
     }
 
-    private Credential toDto(CredentialEntity entity, String rawSecret) {
-        if (entity instanceof HttpCredentialEntity httpCred) {
-            return new HttpCredential(
-                    httpCred.getId() != null ? httpCred.getId().toString() : null,
-                    httpCred.getName(),
-                    httpCred.getHost(),
-                    httpCred.getTargetType() != null ? httpCred.getTargetType().name() : null,
-                    httpCred.getTargetKey(),
-                    httpCred.getFormatTemplate(),
-                    maskSecret(rawSecret));
-        }
-        throw new IllegalStateException("Unsupported credential entity type: " + entity.getClass().getName());
+    private Credential toDto(HttpInjectionEntity injection, String rawSecret) {
+        CredentialEntity credential = injection.getCredential();
+        return new HttpCredential(
+                credential.getId() != null ? credential.getId().toString() : null,
+                credential.getName(),
+                injection.getHost(),
+                injection.getInjectionTarget() != null ? injection.getInjectionTarget().name() : null,
+                injection.getKey(),
+                injection.getFormat(),
+                maskSecret(rawSecret));
     }
 
     public static String maskSecret(String rawSecret) {

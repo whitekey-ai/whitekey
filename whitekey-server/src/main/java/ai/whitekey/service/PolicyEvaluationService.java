@@ -97,7 +97,7 @@ public class PolicyEvaluationService {
         ActionStatus status = switch (effect) {
             case ALLOW -> ActionStatus.ALLOWED;
             case DENY -> ActionStatus.DENIED;
-            case ASK -> ActionStatus.AWAITING_APPROVAL;
+            case ASK -> ActionStatus.PENDING;
         };
         HttpActionEntity action = actions.recordHttp(method, url, headers, bodyBytes, bodyTruncated, status);
         return new EvaluationResult(effect, reason, action);

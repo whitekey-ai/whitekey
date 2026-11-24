@@ -7,8 +7,8 @@ public record CredentialPreset(
         String id,
         String displayName,
         String defaultHost,
-        String targetType,
-        String targetKey,
-        String formatTemplate,
+        String injectionTarget,
+        String key,
+        String format,
         String description
 ) {}

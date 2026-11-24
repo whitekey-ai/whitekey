@@ -5,6 +5,7 @@ import ai.whitekey.api.dto.CreateRuleRequest;
 import ai.whitekey.api.dto.ProtocolConstants;
 import ai.whitekey.api.dto.RuleEffect;
 import ai.whitekey.api.dto.UpdateHttpRuleRequest;
+import ai.whitekey.config.CacheConfig;
 import ai.whitekey.entity.HttpRuleEntity;
 import ai.whitekey.entity.RuleEntity;
 import ai.whitekey.exception.ConflictException;
@@ -13,6 +14,8 @@ import ai.whitekey.policy.HttpPolicyValidator;
 import ai.whitekey.repository.HttpRuleRepository;
 import ai.whitekey.repository.RuleRepository;
 
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Service;
@@ -30,7 +33,6 @@ public class RuleService {
     private final RuleRepository repository;
     private final HttpRuleRepository httpRuleRepository;
     private final HttpPolicyValidator validator;
-    private final TransactionalListCache<HttpRuleEntity> ruleCache = new TransactionalListCache<>();
 
     public RuleService(
             RuleRepository repository,
@@ -42,6 +44,7 @@ public class RuleService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = CacheConfig.HTTP_RULES, allEntries = true)
     public RuleEntity createRule(CreateRuleRequest request) {
         if (request instanceof CreateHttpRuleRequest httpReq) {
             String validName = normalizeAndValidateName(httpReq.name());
@@ -63,6 +66,7 @@ public class RuleService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = CacheConfig.HTTP_RULES, allEntries = true)
     public HttpRuleEntity createAutoHttpRule(
             String baseName,
             RuleEffect effect,
@@ -100,9 +104,7 @@ public class RuleService {
                         validator.queryParams(queryParams),
                         headers != null ? headers : HttpHeaders.EMPTY,
                         validator.bodyCondition(bodyCondition));
-        HttpRuleEntity saved = httpRuleRepository.save(rule);
-        invalidateCache();
-        return saved;
+        return httpRuleRepository.save(rule);
     }
 
     @Transactional(readOnly = true)
@@ -129,21 +131,19 @@ public class RuleService {
             return getRules();
         }
         if (ProtocolConstants.HTTP.equalsIgnoreCase(type.trim())) {
-            return List.copyOf(getHttpRules());
+            return List.copyOf(httpRuleRepository.findAll());
         }
         throw new IllegalArgumentException("Unsupported rule type: " + type);
     }
 
-    public void invalidateCache() {
-        this.ruleCache.invalidateAfterCommit();
-    }
-
     @Transactional(readOnly = true)
+    @Cacheable(CacheConfig.HTTP_RULES)
     public List<HttpRuleEntity> getHttpRules() {
-        return ruleCache.getOrLoad(httpRuleRepository::findAll);
+        return List.copyOf(httpRuleRepository.findAll());
     }
 
     @Transactional
+    @CacheEvict(cacheNames = CacheConfig.HTTP_RULES, allEntries = true)
     public HttpRuleEntity updateHttpRule(String currentName, UpdateHttpRuleRequest request) {
         RuleEntity rule = getRule(currentName);
         if (!(rule instanceof HttpRuleEntity httpRule)) {
@@ -182,15 +182,13 @@ public class RuleService {
         if (request.bodyCondition() != null) {
             httpRule.setBodyCondition(validator.bodyCondition(request.bodyCondition()));
         }
-        HttpRuleEntity saved = httpRuleRepository.save(httpRule);
-        invalidateCache();
-        return saved;
+        return httpRuleRepository.save(httpRule);
     }
 
     @Transactional
+    @CacheEvict(cacheNames = CacheConfig.HTTP_RULES, allEntries = true)
     public void deleteRule(String name) {
         repository.delete(getRule(name));
-        invalidateCache();
     }
 
     private String nextAvailableName(String rawBase) {

@@ -1,5 +1,9 @@
 package ai.whitekey.policy;
 
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
+import com.google.common.util.concurrent.UncheckedExecutionException;
 import com.google.protobuf.NullValue;
 import dev.cel.bundle.Cel;
 import dev.cel.bundle.CelFactory;
@@ -24,18 +28,19 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Predicate;
 
 @Component
 public class CelBodyEvaluator {
 
-    public static final String VAR_BODY = "body";
-    public static final String VAR_DATA = "data";
+    private static final String VAR_BODY = "body";
+    private static final String VAR_DATA = "data";
+    private static final int MAX_CACHED_PROGRAMS = 512;
 
     private static final JsonMapper JSON = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
@@ -43,40 +48,78 @@ public class CelBodyEvaluator {
             .build();
     private static final CelParser PARSER = CelParserFactory.standardCelParserBuilder().build();
 
-    private final Map<String, CompiledCelProgram> cache = new ConcurrentHashMap<>();
+    private final LoadingCache<String, CompiledCelProgram> cache = CacheBuilder.newBuilder()
+            .maximumSize(MAX_CACHED_PROGRAMS)
+            .build(CacheLoader.from(this::compile));
+
+    public record BatchResult(boolean validJson, Set<String> matchedExpressions) {}
 
     private record CompiledCelProgram(Cel.Program program, Set<String> variables) {}
-
-    private static class VariableCollector extends CelExprVisitor {
-        private final Set<String> idents = new HashSet<>();
-
-        @Override
-        protected void visit(CelExpr expr, CelExpr.CelIdent ident) {
-            idents.add(ident.name());
-            super.visit(expr, ident);
-        }
-    }
 
     public void validate(String expression) {
         if (expression == null || expression.isBlank()) {
             return;
         }
+        getOrCompile(expression.trim());
+    }
+
+    public BatchResult evaluateAll(Collection<String> expressions, Path bodyFile) {
         try {
-            getOrCompile(expression.trim());
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Invalid CEL body expression: " + e.getMessage(), e);
+            if (bodyFile == null || !Files.exists(bodyFile) || Files.size(bodyFile) == 0) {
+                return evaluateAll(expressions, (InputStream) null);
+            }
+            try (InputStream in = Files.newInputStream(bodyFile)) {
+                return evaluateAll(expressions, in);
+            }
+        } catch (IOException e) {
+            return new BatchResult(false, Set.of());
         }
     }
 
-    public boolean isValidJson(byte[] bodyBytes) {
-        return withStream(bodyBytes, this::isValidJson);
+    public BatchResult evaluateAll(Collection<String> expressions, byte[] bodyBytes) {
+        if (bodyBytes == null || bodyBytes.length == 0) {
+            return evaluateAll(expressions, (InputStream) null);
+        }
+        return evaluateAll(expressions, new ByteArrayInputStream(bodyBytes));
     }
 
-    public boolean isValidJson(Path filePath) {
-        return withStream(filePath, this::isValidJson);
+    private BatchResult evaluateAll(Collection<String> expressions, InputStream inputStream) {
+        Map<String, CompiledCelProgram> compiled = new LinkedHashMap<>();
+        Set<String> allVars = new HashSet<>();
+        if (expressions != null) {
+            for (String raw : expressions) {
+                String expr = raw != null ? raw.trim() : "";
+                if (expr.isEmpty() || compiled.containsKey(expr)) {
+                    continue;
+                }
+                try {
+                    CompiledCelProgram program = getOrCompile(expr);
+                    compiled.put(expr, program);
+                    allVars.addAll(program.variables());
+                } catch (IllegalArgumentException ignored) {
+                }
+            }
+        }
+
+        Map<String, Object> activation = new HashMap<>();
+        if (!readActivation(inputStream, allVars, activation)) {
+            return new BatchResult(false, Set.of());
+        }
+        allVars.forEach(var -> activation.putIfAbsent(var, NullValue.NULL_VALUE));
+
+        Set<String> matched = new HashSet<>();
+        for (Map.Entry<String, CompiledCelProgram> entry : compiled.entrySet()) {
+            try {
+                if (Boolean.TRUE.equals(entry.getValue().program().eval(activation))) {
+                    matched.add(entry.getKey());
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return new BatchResult(true, matched);
     }
 
-    public boolean isValidJson(InputStream inputStream) {
+    private static boolean readActivation(InputStream inputStream, Set<String> allVars, Map<String, Object> activation) {
         if (inputStream == null) {
             return true;
         }
@@ -85,128 +128,80 @@ public class CelBodyEvaluator {
             if (token == null) {
                 return true;
             }
-            if (token != JsonToken.START_OBJECT && token != JsonToken.START_ARRAY) {
+            if (token == JsonToken.START_OBJECT) {
+                while (parser.nextToken() != JsonToken.END_OBJECT && parser.currentToken() != null) {
+                    String propName = parser.currentName();
+                    parser.nextToken();
+                    if (allVars.contains(propName)) {
+                        Object val = JSON.readValue(parser, Object.class);
+                        activation.put(propName, val != null ? val : NullValue.NULL_VALUE);
+                    } else {
+                        parser.skipChildren();
+                    }
+                }
+            } else if (token == JsonToken.START_ARRAY) {
+                boolean needsRootArray = allVars.contains(VAR_BODY) || allVars.contains(VAR_DATA);
+                if (needsRootArray) {
+                    Object arrayVal = JSON.readValue(parser, Object.class);
+                    Object celVal = arrayVal != null ? arrayVal : NullValue.NULL_VALUE;
+                    if (allVars.contains(VAR_BODY)) {
+                        activation.put(VAR_BODY, celVal);
+                    }
+                    if (allVars.contains(VAR_DATA)) {
+                        activation.put(VAR_DATA, celVal);
+                    }
+                } else {
+                    parser.skipChildren();
+                }
+            } else {
                 return false;
             }
-            parser.skipChildren();
             return parser.nextToken() == null;
         } catch (Exception e) {
             return false;
         }
     }
 
-    public boolean matches(String expression, byte[] bodyBytes) {
-        return withStream(bodyBytes, in -> matches(expression, in));
-    }
-
-    public boolean matches(String expression, Path filePath) {
-        return withStream(filePath, in -> matches(expression, in));
-    }
-
-    private static boolean withStream(byte[] bodyBytes, Predicate<InputStream> consumer) {
-        if (bodyBytes == null || bodyBytes.length == 0) {
-            return consumer.test(null);
-        }
-        return consumer.test(new ByteArrayInputStream(bodyBytes));
-    }
-
-    private static boolean withStream(Path filePath, Predicate<InputStream> consumer) {
-        try {
-            if (filePath == null || !Files.exists(filePath) || Files.size(filePath) == 0) {
-                return consumer.test(null);
-            }
-            try (InputStream in = Files.newInputStream(filePath)) {
-                return consumer.test(in);
-            }
-        } catch (IOException e) {
-            return false;
-        }
-    }
-
-    public boolean matches(String expression, InputStream inputStream) {
-        if (expression == null || expression.isBlank()) {
-            return true;
-        }
-        CompiledCelProgram compiled;
-        try {
-            compiled = getOrCompile(expression.trim());
-        } catch (Exception e) {
-            return false;
-        }
-
-        Set<String> vars = compiled.variables();
-        Map<String, Object> activation = new HashMap<>();
-
-        if (inputStream != null) {
-            try (JsonParser parser = JSON.createParser(inputStream)) {
-                JsonToken token = parser.nextToken();
-                if (token == JsonToken.START_OBJECT) {
-                    while (parser.nextToken() != JsonToken.END_OBJECT && parser.currentToken() != null) {
-                        String propName = parser.currentName();
-                        parser.nextToken(); // Move to property value
-                        if (vars.contains(propName)) {
-                            Object val = JSON.readValue(parser, Object.class);
-                            activation.put(propName, val != null ? val : NullValue.NULL_VALUE);
-                        } else {
-                            parser.skipChildren();
-                        }
-                    }
-                } else if (token == JsonToken.START_ARRAY) {
-                    Object arrayVal = JSON.readValue(parser, Object.class);
-                    Object celVal = arrayVal != null ? arrayVal : NullValue.NULL_VALUE;
-                    if (vars.contains(VAR_BODY)) {
-                        activation.put(VAR_BODY, celVal);
-                    }
-                    if (vars.contains(VAR_DATA)) {
-                        activation.put(VAR_DATA, celVal);
-                    }
-                }
-                if (token != null && parser.nextToken() != null) {
-                    return false;
-                }
-            } catch (Exception e) {
-                return false;
-            }
-        }
-
-        for (String var : vars) {
-            activation.putIfAbsent(var, NullValue.NULL_VALUE);
-        }
-
-        try {
-            Object result = compiled.program().eval(activation);
-            return Boolean.TRUE.equals(result);
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
     private CompiledCelProgram getOrCompile(String expression) {
-        return cache.computeIfAbsent(expression, this::compile);
+        try {
+            return cache.getUnchecked(expression);
+        } catch (UncheckedExecutionException e) {
+            if (e.getCause() instanceof IllegalArgumentException iae) {
+                throw iae;
+            }
+            throw e;
+        }
     }
 
     private CompiledCelProgram compile(String expression) {
         try {
             CelValidationResult parseResult = PARSER.parse(expression);
             if (parseResult.hasError()) {
-                throw new IllegalArgumentException(parseResult.getErrorString());
+                throw new IllegalArgumentException("Invalid CEL body expression: " + parseResult.getErrorString());
             }
 
             CelAbstractSyntaxTree ast = parseResult.getAst();
-            VariableCollector collector = new VariableCollector();
-            collector.visit(ast);
+            Set<String> idents = new HashSet<>();
+            new CelExprVisitor() {
+                @Override
+                protected void visit(CelExpr expr, CelExpr.CelIdent ident) {
+                    idents.add(ident.name());
+                    super.visit(expr, ident);
+                }
+            }.visit(ast);
 
             var celBuilder = CelFactory.plannerCelBuilder();
-            for (String id : collector.idents) {
-                celBuilder.addVar(id, SimpleType.DYN);
-            }
+            idents.forEach(id -> celBuilder.addVar(id, SimpleType.DYN));
             Cel cel = celBuilder.build();
-            CelAbstractSyntaxTree checkedAst = cel.compile(expression).getAst();
-            return new CompiledCelProgram(cel.createProgram(checkedAst), Set.copyOf(collector.idents));
+            CelValidationResult checkResult = cel.check(ast);
+            if (checkResult.hasError()) {
+                throw new IllegalArgumentException("Invalid CEL body expression: " + checkResult.getErrorString());
+            }
+            return new CompiledCelProgram(cel.createProgram(checkResult.getAst()), Set.copyOf(idents));
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {
-            throw new IllegalArgumentException("CEL compilation failed: " + e.getMessage(), e);
+            throw new IllegalArgumentException("Invalid CEL body expression: " + e.getMessage(), e);
         }
     }
 }

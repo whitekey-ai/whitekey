@@ -18,7 +18,7 @@ import java.util.UUID;
 
 @Entity
 @Table(
-        name = "agent_rule",
+        name = "rule",
         indexes = {
                 @Index(name = "idx_rule_name", columnList = "name", unique = true)
         })
@@ -30,7 +30,7 @@ public abstract class RuleEntity {
     @UuidGenerator(style = UuidGenerator.Style.VERSION_7)
     private UUID id;
 
-    @Column(name = "name", nullable = false, unique = true)
+    @Column(name = "name", nullable = false)
     private String name;
 
     @Enumerated(EnumType.STRING)
@@ -63,6 +63,4 @@ public abstract class RuleEntity {
     public void setEffect(RuleEffect effect) {
         this.effect = effect;
     }
-
-    public abstract String getType();
 }

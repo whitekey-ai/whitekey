@@ -112,7 +112,7 @@ public class ApiClient {
     }
 
     public List<Action> getPendingApprovals() {
-        return getHistory(Integer.MAX_VALUE, "AWAITING_APPROVAL", null, null).stream()
+        return getHistory(Integer.MAX_VALUE, "PENDING", null, null).stream()
                 .sorted(Comparator.comparing(Action::id, Comparator.nullsLast(String::compareTo)))
                 .toList();
     }

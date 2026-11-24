@@ -30,6 +30,7 @@
 		<cel.version>0.15.0</cel.version>
 		<bouncycastle.version>1.84</bouncycastle.version>
 		<jline.version>3.30.17</jline.version>
+		<guava.version>33.7.2-jre</guava.version>
 	</properties>
 
 </project>

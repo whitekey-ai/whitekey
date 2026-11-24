@@ -23,9 +23,9 @@ public class CredentialPresetService {
                         p.id(),
                         p.displayName(),
                         p.defaultHost(),
-                        p.targetType() != null ? p.targetType().name() : null,
-                        p.targetKey(),
-                        p.formatTemplate(),
+                        p.injectionTarget() != null ? p.injectionTarget().name() : null,
+                        p.key(),
+                        p.format(),
                         p.description()))
                 .toList();
     }

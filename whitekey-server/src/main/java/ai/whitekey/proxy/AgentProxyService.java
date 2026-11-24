@@ -51,7 +51,7 @@ public class AgentProxyService {
     public static final String ERROR_INTERRUPTED = "interrupted";
     public static final String ERROR_APPROVAL_ERROR = "approval_error";
     public static final String ERROR_APPROVAL_REJECTED = "approval_rejected";
-    public static final String ERROR_APPROVAL_EXPIRED = "approval_expired";
+    public static final String ERROR_APPROVAL_CANCELLED = "approval_cancelled";
     public static final String ERROR_APPROVAL_PENDING = "approval_pending";
     public static final String ERROR_POLICY_DENIED = "policy_denied";
     public static final String ERROR_INVALID_REQUEST = "invalid_request";
@@ -314,13 +314,13 @@ public class AgentProxyService {
         try {
             if (!clientDisconnected.isDone()) {
                 ActionEntity current = actionService.getAction(actionId);
-                if (current.getStatus() != ActionStatus.AWAITING_APPROVAL) {
+                if (current.getStatus() != ActionStatus.PENDING) {
                     return resolveOutcome(current);
                 }
                 CompletableFuture.anyOf(waiter, clientDisconnected).get();
             }
             if (clientDisconnected.isDone()) {
-                expire(actionId, ActionStatus.CANCELLED);
+                cancelPending(actionId);
                 return ProxyResponse.jsonError(
                         HTTP_CLIENT_CLOSED_REQUEST,
                         ERROR_CLIENT_DISCONNECTED,
@@ -329,7 +329,7 @@ public class AgentProxyService {
             return resolveOutcome(actionService.getAction(actionId));
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            expire(actionId, ActionStatus.CANCELLED);
+            cancelPending(actionId);
             return ProxyResponse.jsonError(HttpStatus.SERVICE_UNAVAILABLE.value(), ERROR_INTERRUPTED, "Request interrupted");
         } catch (ExecutionException error) {
             return ProxyResponse.jsonError(HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_APPROVAL_ERROR, "Failed waiting for approval");
@@ -343,18 +343,16 @@ public class AgentProxyService {
             case ALLOWED -> null; // Proceed to forward!
             case DENIED ->
                     ProxyResponse.jsonError(HttpStatus.FORBIDDEN.value(), ERROR_APPROVAL_REJECTED, "Human approval rejected");
-            case EXPIRED ->
-                    ProxyResponse.jsonError(HttpStatus.CONFLICT.value(), ERROR_APPROVAL_EXPIRED, "Approval expired before completion");
             case CANCELLED ->
-                    ProxyResponse.jsonError(HTTP_CLIENT_CLOSED_REQUEST, ERROR_CLIENT_DISCONNECTED, "Client closed connection before approval");
-            case AWAITING_APPROVAL, FAILED ->
+                    ProxyResponse.jsonError(HttpStatus.CONFLICT.value(), ERROR_APPROVAL_CANCELLED, "Approval cancelled before completion");
+            case PENDING ->
                     ProxyResponse.jsonError(HttpStatus.INTERNAL_SERVER_ERROR.value(), ERROR_APPROVAL_PENDING, "Approval still pending");
         };
     }
 
-    private void expire(UUID actionId, ActionStatus status) {
+    private void cancelPending(UUID actionId) {
         try {
-            actionService.expirePendingAction(actionId, status);
+            actionService.cancelPendingAction(actionId);
         } catch (Exception ignored) {
         }
     }
@@ -394,25 +392,16 @@ public class AgentProxyService {
                     copyResponseHeaders(upstream),
                     upstream.body());
         } catch (SSLException sslError) {
-            return upstreamFailure(actionId, ActionStatus.FAILED, HttpStatus.BAD_GATEWAY, ERROR_UPSTREAM_TLS_FAILED, "Upstream TLS handshake failed");
+            return ProxyResponse.jsonError(HttpStatus.BAD_GATEWAY.value(), ERROR_UPSTREAM_TLS_FAILED, "Upstream TLS handshake failed");
         } catch (ConnectException connectError) {
-            return upstreamFailure(actionId, ActionStatus.FAILED, HttpStatus.BAD_GATEWAY, ERROR_UPSTREAM_CONNECT_FAILED, "Could not connect to upstream host");
+            return ProxyResponse.jsonError(HttpStatus.BAD_GATEWAY.value(), ERROR_UPSTREAM_CONNECT_FAILED, "Could not connect to upstream host");
         } catch (IOException ioError) {
-            return upstreamFailure(actionId, ActionStatus.FAILED, HttpStatus.BAD_GATEWAY, ERROR_UPSTREAM_IO_FAILED, "Upstream request failed or timed out");
+            return ProxyResponse.jsonError(HttpStatus.BAD_GATEWAY.value(), ERROR_UPSTREAM_IO_FAILED, "Upstream request failed or timed out");
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            return upstreamFailure(actionId, ActionStatus.CANCELLED, HttpStatus.SERVICE_UNAVAILABLE, ERROR_INTERRUPTED, "Upstream request interrupted");
+            actionService.updateStatus(actionId, ActionStatus.CANCELLED);
+            return ProxyResponse.jsonError(HttpStatus.SERVICE_UNAVAILABLE.value(), ERROR_INTERRUPTED, "Upstream request interrupted");
         }
-    }
-
-    private ProxyResponse upstreamFailure(
-            UUID actionId,
-            ActionStatus actionStatus,
-            HttpStatus httpStatus,
-            String errorCode,
-            String reason) {
-        actionService.updateStatus(actionId, actionStatus);
-        return ProxyResponse.jsonError(httpStatus.value(), errorCode, reason);
     }
 
     private static Map<String, List<String>> copyResponseHeaders(HttpResponse<InputStream> upstream) {

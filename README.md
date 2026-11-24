@@ -69,7 +69,7 @@ Built-in presets: `github`, `stripe`, `slack`, `openai`, `anthropic`.
 whitekey credentials presets
 whitekey credentials list
 whitekey credentials add --name github-pat --preset github --secret ghp_...
-whitekey credentials add --name my-api --host api.example.com --type HEADER --key X-API-Key --format "%s" --secret sk_...
+whitekey credentials add --name my-api --host api.example.com --injection-target HEADER --key X-API-Key --format "%s" --secret sk_...
 whitekey credentials remove github-pat
 ```
 
@@ -77,7 +77,7 @@ whitekey credentials remove github-pat
 
 ```bash
 whitekey status
-whitekey history [--limit 20] [--status ALLOWED|DENIED|AWAITING_APPROVAL|EXPIRED|CANCELLED|FAILED] [--method GET] [--host api.github.com]
+whitekey history [--limit 20] [--status PENDING|ALLOWED|DENIED|CANCELLED] [--method GET] [--host api.github.com]
 whitekey history clear
 ```
 
