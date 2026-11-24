@@ -15,10 +15,18 @@ public record CredentialPresetProperties(List<PresetDefinition> presets) {
     public record PresetDefinition(
             String id,
             String displayName,
-            String defaultHost,
+            List<InjectionDefinition> injections,
+            String description
+    ) {
+        public PresetDefinition {
+            injections = injections != null ? List.copyOf(injections) : List.of();
+        }
+    }
+
+    public record InjectionDefinition(
+            String host,
             HttpInjectionTarget injectionTarget,
             String key,
-            String format,
-            String description
+            String format
     ) {}
 }

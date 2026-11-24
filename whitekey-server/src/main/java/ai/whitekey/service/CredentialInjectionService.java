@@ -9,8 +9,11 @@ import org.springframework.web.util.UriUtils;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class CredentialInjectionService {
@@ -20,6 +23,7 @@ public class CredentialInjectionService {
     public static final String TOKEN_PLACEHOLDER = "{token}";
     public static final String SECRET_PLACEHOLDER = "{secret}";
     public static final String COOKIE_SEPARATOR = "; ";
+    private static final Pattern BASE64_FUNCTION_PATTERN = Pattern.compile("base64\\(([^)]*)\\)");
 
     private final CredentialService credentialService;
     private final EncryptionService encryptionService;
@@ -94,11 +98,28 @@ public class CredentialInjectionService {
         return false;
     }
 
-    private String formatValue(String template, String secret) {
+    private static String formatValue(String template, String secret) {
         if (template == null || template.isBlank()) {
             return secret;
         }
-        return template
+        Matcher matcher = BASE64_FUNCTION_PATTERN.matcher(template);
+        if (!matcher.find()) {
+            return substitutePlaceholders(template, secret);
+        }
+        StringBuilder result = new StringBuilder(template.length());
+        int lastEnd = 0;
+        do {
+            result.append(substitutePlaceholders(template.substring(lastEnd, matcher.start()), secret));
+            String plain = substitutePlaceholders(matcher.group(1), secret);
+            result.append(Base64.getEncoder().encodeToString(plain.getBytes(StandardCharsets.UTF_8)));
+            lastEnd = matcher.end();
+        } while (matcher.find());
+        result.append(substitutePlaceholders(template.substring(lastEnd), secret));
+        return result.toString();
+    }
+
+    private static String substitutePlaceholders(String segment, String secret) {
+        return segment
                 .replace(PERCENT_S_PLACEHOLDER, secret)
                 .replace(TOKEN_PLACEHOLDER, secret)
                 .replace(SECRET_PLACEHOLDER, secret);

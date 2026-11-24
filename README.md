@@ -63,7 +63,7 @@ whitekey rules remove allow_github
 
 ### Credentials
 
-Built-in presets: `github`, `stripe`, `slack`, `openai`, `anthropic`.
+Built-in presets: `github`.
 
 ```bash
 whitekey credentials presets

@@ -1,6 +1,7 @@
 package ai.whitekey.service;
 
 import ai.whitekey.api.dto.CredentialPreset;
+import ai.whitekey.api.dto.HttpInjection;
 import ai.whitekey.config.CredentialPresetProperties;
 import org.springframework.stereotype.Service;
 
@@ -22,10 +23,13 @@ public class CredentialPresetService {
                 .map(p -> new CredentialPreset(
                         p.id(),
                         p.displayName(),
-                        p.defaultHost(),
-                        p.injectionTarget() != null ? p.injectionTarget().name() : null,
-                        p.key(),
-                        p.format(),
+                        p.injections().stream()
+                                .map(inj -> new HttpInjection(
+                                        inj.host(),
+                                        inj.injectionTarget() != null ? inj.injectionTarget().name() : null,
+                                        inj.key(),
+                                        inj.format()))
+                                .toList(),
                         p.description()))
                 .toList();
     }

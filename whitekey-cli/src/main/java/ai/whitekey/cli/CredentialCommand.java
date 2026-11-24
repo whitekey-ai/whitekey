@@ -4,12 +4,15 @@ import ai.whitekey.api.dto.CreateHttpCredentialRequest;
 import ai.whitekey.api.dto.Credential;
 import ai.whitekey.api.dto.CredentialPreset;
 import ai.whitekey.api.dto.HttpCredential;
+import ai.whitekey.api.dto.HttpInjection;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 @Command(name = "credentials", description = "Manage credentials (stored encrypted, injected on egress)",
         subcommands = {
@@ -36,12 +39,27 @@ public class CredentialCommand extends BaseCommand {
 
             for (Credential c : credentials) {
                 if (c instanceof HttpCredential hc) {
-                    System.out.printf("%s  %s  %s:%s  %s%n",
-                            hc.name(),
-                            hc.host() != null ? hc.host() : WILDCARD_HOST,
-                            hc.injectionTarget() != null ? hc.injectionTarget() : DEFAULT_INJECTION_TARGET,
-                            hc.key() != null ? hc.key() : "-",
-                            hc.maskedSecret() != null ? hc.maskedSecret() : "");
+                    String masked = hc.maskedSecret() != null ? hc.maskedSecret() : "";
+                    List<HttpInjection> injections = hc.injections();
+                    if (injections.isEmpty()) {
+                        System.out.printf("%s  -  %s%n", hc.name(), masked);
+                    } else if (injections.size() == 1) {
+                        HttpInjection inj = injections.getFirst();
+                        System.out.printf("%s  %s  %s:%s  %s%n",
+                                hc.name(),
+                                inj.host() != null ? inj.host() : WILDCARD_HOST,
+                                inj.injectionTarget() != null ? inj.injectionTarget() : DEFAULT_INJECTION_TARGET,
+                                inj.key() != null ? inj.key() : "-",
+                                masked);
+                    } else {
+                        String summary = injections.stream()
+                                .map(inj -> String.format("%s (%s:%s)",
+                                        inj.host() != null ? inj.host() : WILDCARD_HOST,
+                                        inj.injectionTarget() != null ? inj.injectionTarget() : DEFAULT_INJECTION_TARGET,
+                                        inj.key() != null ? inj.key() : "-"))
+                                .collect(Collectors.joining(", "));
+                        System.out.printf("%s  %s  %s%n", hc.name(), summary, masked);
+                    }
                 } else {
                     System.out.printf("%s  [%s]  %s%n",
                             c.name(), c.type(), c.maskedSecret() != null ? c.maskedSecret() : "");
@@ -62,7 +80,11 @@ public class CredentialCommand extends BaseCommand {
             }
 
             for (CredentialPreset p : presets) {
-                System.out.printf("%-12s %-16s %s%n", p.id(), p.displayName(), p.defaultHost() != null ? p.defaultHost() : "");
+                String hosts = p.injections().stream()
+                        .map(HttpInjection::host)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.joining(", "));
+                System.out.printf("%-12s %-16s %s%n", p.id(), p.displayName(), hosts);
             }
         }
     }
@@ -76,10 +98,10 @@ public class CredentialCommand extends BaseCommand {
         @Option(names = "--secret", required = true, description = "Secret token value")
         private String secret;
 
-        @Option(names = "--preset", description = "Preset ID (e.g. github, stripe, slack)")
+        @Option(names = "--preset", description = "Preset ID (e.g. github)")
         private String preset;
 
-        @Option(names = "--host", description = "Target host (e.g. api.github.com, *.slack.com)")
+        @Option(names = "--host", description = "Target host (e.g. api.example.com, *.example.com)")
         private String host;
 
         @Option(names = "--injection-target", description = "Injection target: HEADER, QUERY, or COOKIE (default: HEADER or preset default)")
